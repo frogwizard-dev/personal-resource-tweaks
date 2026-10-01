@@ -1,0 +1,15 @@
+## Interface: 16001, 120000, 120001, 120005, 120007, 120100
+## Title: PersonalResourceTweaks
+## Notes: Skins Blizzard's Personal Resource Display and shows whitelisted buffs/debuffs above it.
+## Version: 0.5.1
+## OptionalDeps: EllesmereUI
+## SavedVariables: PersonalResourceTweaksDB
+## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
+## AddonCompartmentFunc: PersonalResourceTweaks_OnCompartmentClick
+
+Options.lua
+Core.lua
+Media.lua
+Skin.lua
+Auras.lua
+Config.lua
