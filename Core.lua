@@ -11,7 +11,20 @@ ns.defaults = {
         -- Text templates per slot; see Compile in Skin.lua. Empty = hidden.
         healthText = { left = "", center = "value (percent)", right = "" },
         powerText = { left = "", center = "value", right = "" },
+        -- Its own text for these power types (mana and anything else use powerText). Rage and
+        -- energy top out at 100, so their percent only repeats the number.
+        powerTextFor = {
+            RAGE = { left = "", center = "value", right = "" },
+            ENERGY = { left = "", center = "value", right = "" },
+        },
     },
+    -- Fade the display out when idle (Power.lua): out of combat, full health, power at rest
+    -- and (with `target`) nothing targeted. alpha: how visible it stays.
+    fade = { enabled = true, alpha = 0, target = true },
+    -- Lines on the power bar at each ability's cost (Power.lua). spells: spell IDs; a mark shows
+    -- for the ones you know that cost the bar's power. (Seeded once, below: as a default here,
+    -- spells you remove would come back at the next login.)
+    marks = { enabled = true, width = 1, color = { r = 1, g = 1, b = 1, a = 0.7 }, spells = {} },
     text = {
         font = "Fonts\\FRIZQT__.TTF",
         outline = "OUTLINE",
@@ -30,6 +43,8 @@ ns.defaults = {
         enabled = true, mode = "whitelist", list = {}, blacklist = {}, max = 16,
         size = 28, spacing = 3, perRow = 8, offsetY = 4, showTimer = true,
     },
+    -- Left-click the display to target yourself, right-click for your unit menu (Clicks.lua).
+    clicks = { enabled = true },
     debuffs = {
         enabled = true, mode = "blacklist", list = {}, blacklist = {}, max = 16,
         size = 24, spacing = 3, perRow = 8, offsetY = 4, showTimer = true,
@@ -58,6 +73,8 @@ end
 function ns.Refresh()
     ns.Skin:Apply()
     ns.Auras:Apply()
+    if ns.Clicks.initialised then ns.Clicks:Place() end
+    if ns.Power.initialised then ns.Power:Apply() end
 end
 
 local f = CreateFrame("Frame")
@@ -97,11 +114,29 @@ f:SetScript("OnEvent", function(_, event, arg1)
             end
             db.skin.healthTemplate, db.skin.powerTemplate = nil, nil
         end
+        -- 0.6 adds text per power type: rage and energy start as the power text without its percent.
+        if db.skin and db.skin.powerText and not db.skin.powerTextFor then
+            local function NoPercent(s)
+                s = (s or ""):gsub("[Pp][Ee][Rr][Cc][Ee][Nn][Tt]%.?%d*", "")
+                s = s:gsub("%(%s*%)", ""):gsub("^[%s|/%-]+", ""):gsub("[%s|/%-]+$", "")
+                return s
+            end
+            local slots = {}
+            for slot, s in pairs(db.skin.powerText) do slots[slot] = NoPercent(s) end
+            db.skin.powerTextFor = { RAGE = CopyTable(slots), ENERGY = CopyTable(slots) }
+        end
+        local firstMarks = db.marks == nil
         CopyDefaults(ns.defaults, db)
+        -- Heroic Strike, Revenge and Shield Block, to start with.
+        if firstMarks then db.marks.spells = { 78, 6572, 2565 } end
         ns.db = db
     elseif event == "PLAYER_LOGIN" then
         ns.Skin:Init()
         ns.Auras:Init()
+        ns.Clicks:Init()
+        ns.Clicks.initialised = true
+        ns.Power:Init()
+        ns.Power.initialised = true
     end
 end)
 
@@ -110,6 +145,8 @@ SlashCmdList.PERSONALRESOURCETWEAKS = function(msg)
     msg = strtrim(msg or ""):lower()
     if msg == "debug" then
         ns.Skin:Debug()
+    elseif msg == "fade" then
+        ns.Power:Debug()
     else
         ns.Config:Toggle()
     end

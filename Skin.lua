@@ -3,7 +3,6 @@ local Skin = {}
 ns.Skin = Skin
 
 local issecret = ns.issecret
-local WHITE = "Interface\\Buttons\\WHITE8X8"
 local guard = false
 
 -- Blizzard has moved these children around between patches, so try the known names.
@@ -24,6 +23,31 @@ local function ClassColor()
     return c.r, c.g, c.b
 end
 
+-- Rather than guess texture names, hide by role. The health container is pure art. On the
+-- bars, everything Blizzard draws that matters (heal prediction, absorbs, the mana cost) is
+-- kept on the bar under a key, while the frame art is unnamed: Blizzard's dark backing, and
+-- borders other add-ons add (ClassicUI Forever's gold plate rim). So: hide every unnamed
+-- texture that isn't the fill or ours.
+local function NamedRegions(frame)
+    local named = {}
+    for _, v in pairs(frame) do
+        if type(v) == "table" and type(v.IsObjectType) == "function" then named[v] = true end
+    end
+    return named
+end
+
+local function HideTextures(frame, allLayers)
+    if not frame then return end
+    local fill = frame.GetStatusBarTexture and frame:GetStatusBarTexture()
+    local named = not allLayers and NamedRegions(frame)
+    for _, region in ipairs({ frame:GetRegions() }) do
+        if region:IsObjectType("Texture") and not region.prtOwned and region ~= fill
+            and (allLayers or not named[region]) then
+            region:SetAlpha(0)
+        end
+    end
+end
+
 local function Enforce(bar)
     local db = ns.db.skin
     if not db.enabled then return end
@@ -33,9 +57,13 @@ local function Enforce(bar)
         bar:SetStatusBarColor(bar.prtColorFn())
     end
     guard = false
+    -- Another add-on re-skinning the bar (ClassicUI Forever adds its rim, then sets its
+    -- texture) lands here too, so its new art is hidden as soon as it's made.
+    HideTextures(bar)
 end
 
--- Blizzard resets texture/colour on its own updates, so re-apply ours right after.
+-- Blizzard and other add-ons reset texture/colour on their own updates, so re-apply ours
+-- right after.
 local function Hook(bar, colorFn)
     bar.prtColorFn = colorFn
     if bar.prtHooked then return end
@@ -47,6 +75,45 @@ local function Hook(bar, colorFn)
     hooksecurefunc(bar, "SetStatusBarColor", reapply)
 end
 
+-- The border: four edges round the outside of the bar, borderSize screen pixels thick. Sizes in
+-- interface units come out as fractions of a pixel at most UI and nameplate scales (and a
+-- fraction gets rounded differently on each side), so each edge is sized in whole pixels and the
+-- engine keeps its layout on the pixel grid, as Blizzard's own nameplate borders do.
+local EDGES = { "Top", "Bottom", "Left", "Right" }
+
+local function Snap(region)
+    if region.SetRoundLayoutToNearestPixel then region:SetRoundLayoutToNearestPixel(true) end
+    if region.SetSnapToPixelGrid then
+        region:SetSnapToPixelGrid(false)
+        region:SetTexelSnappingBias(0)
+    end
+end
+
+local function PlaceBorder(bar)
+    local b = bar.prtBorder
+    local size = ns.db.skin.borderSize
+    if not b or size <= 0 then return end
+    -- size pixels, in the border's own units.
+    local t = size * (768 / select(2, GetPhysicalScreenSize())) / b:GetEffectiveScale()
+    local e = b.edges
+    e.Top:ClearAllPoints()
+    e.Top:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", -t, 0)
+    e.Top:SetPoint("BOTTOMRIGHT", bar, "TOPRIGHT", t, 0)
+    e.Top:SetHeight(t)
+    e.Bottom:ClearAllPoints()
+    e.Bottom:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", -t, 0)
+    e.Bottom:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", t, 0)
+    e.Bottom:SetHeight(t)
+    e.Left:ClearAllPoints()
+    e.Left:SetPoint("TOPRIGHT", bar, "TOPLEFT", 0, 0)
+    e.Left:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT", 0, 0)
+    e.Left:SetWidth(t)
+    e.Right:ClearAllPoints()
+    e.Right:SetPoint("TOPLEFT", bar, "TOPRIGHT", 0, 0)
+    e.Right:SetPoint("BOTTOMLEFT", bar, "BOTTOMRIGHT", 0, 0)
+    e.Right:SetWidth(t)
+end
+
 local function Decorate(bar)
     local db = ns.db.skin
     if not bar.prtBg then
@@ -54,35 +121,25 @@ local function Decorate(bar)
         bar.prtBg.prtOwned = true
         bar.prtBg:SetAllPoints()
         bar.prtBg:SetColorTexture(0, 0, 0, 0.6)
-        bar.prtBorder = CreateFrame("Frame", nil, bar, "BackdropTemplate")
+        local b = CreateFrame("Frame", nil, bar)
+        b:SetAllPoints()
+        Snap(b)
+        b.edges = {}
+        for _, key in ipairs(EDGES) do
+            local edge = b:CreateTexture(nil, "OVERLAY")
+            Snap(edge)
+            b.edges[key] = edge
+        end
+        bar.prtBorder = b
+        -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale).
+        bar:HookScript("OnSizeChanged", PlaceBorder)
     end
     local size, c = db.borderSize, db.borderColor
     local b = bar.prtBorder
-    b:ClearAllPoints()
-    b:SetPoint("TOPLEFT", -size, size)
-    b:SetPoint("BOTTOMRIGHT", size, -size)
-    if size > 0 then
-        b:SetBackdrop({ edgeFile = WHITE, edgeSize = size })
-        b:SetBackdropBorderColor(c.r, c.g, c.b, c.a or 1)
-    end
+    for _, edge in pairs(b.edges) do edge:SetColorTexture(c.r, c.g, c.b, c.a or 1) end
+    PlaceBorder(bar)
     bar.prtBg:SetShown(db.enabled and db.background)
     b:SetShown(db.enabled and size > 0)
-end
-
--- Rather than guess Blizzard's texture names, hide by role: the health container is pure
--- art, and on the bars everything in the BACKGROUND/BORDER layers is frame art. The fill and
--- heal prediction live in ARTWORK and above, so they're untouched.
-local function HideTextures(frame, allLayers)
-    if not frame then return end
-    local fill = frame.GetStatusBarTexture and frame:GetStatusBarTexture()
-    for _, region in ipairs({ frame:GetRegions() }) do
-        if region:IsObjectType("Texture") and not region.prtOwned and region ~= fill then
-            local layer = region:GetDrawLayer()
-            if allLayers or layer == "BACKGROUND" or layer == "BORDER" then
-                region:SetAlpha(0)
-            end
-        end
-    end
 end
 
 local function HideBlizzardArt(prd, health, power, alt)
@@ -169,8 +226,9 @@ local function UpdateHealthText()
 end
 
 local function UpdatePowerText()
-    local pType = UnitPowerType("player")
-    SetBarTexts(Skin.powerTexts, ns.db.skin.powerText,
+    local pType, token = UnitPowerType("player")
+    local db = ns.db.skin
+    SetBarTexts(Skin.powerTexts, db.powerTextFor[token] or db.powerText,
         UnitPower("player", pType), UnitPowerMax("player", pType), PowerPercent(pType))
 end
 
@@ -212,6 +270,8 @@ function Skin:Apply()
     if not prd.prtHooked then
         prd.prtHooked = true
         prd:HookScript("OnShow", function() ns.Refresh() end)
+        -- Edit Mode's size for the display is a scale, which moves the border off whole pixels.
+        hooksecurefunc(prd, "SetScale", function() ns.Refresh() end)
     end
 
     local t = ns.db.text
@@ -244,6 +304,8 @@ function Skin:Init()
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("ADDON_LOADED")
+    ev:RegisterEvent("UI_SCALE_CHANGED")
+    ev:RegisterEvent("DISPLAY_SIZE_CHANGED")
     ev:RegisterUnitEvent("UNIT_HEALTH", "player")
     ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
     ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")

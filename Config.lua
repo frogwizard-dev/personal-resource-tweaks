@@ -3,7 +3,7 @@ local Config = {}
 ns.Config = Config
 
 local issecret = ns.issecret
-local W, H = 440, 670
+local W, H = 550, 700
 local ROW_H = 26
 
 local function Label(parent, text, template)
@@ -197,6 +197,7 @@ local function TextBox(parent, text, get, set)
     end)
     eb:SetScript("OnEnterPressed", eb.ClearFocus)
     eb:SetScript("OnEscapePressed", eb.ClearFocus)
+    f.eb = eb
     return f
 end
 
@@ -214,7 +215,9 @@ function Config:BuildBars(p)
 
     place(Checkbox(p, "Skin the Personal Resource Display", function() return db.enabled end, function(v) db.enabled = v end), 30)
     place(Checkbox(p, "Class-coloured health bar", function() return db.classColor end, function(v) db.classColor = v end), 26)
-    place(Checkbox(p, "Dark background behind bars", function() return db.background end, function(v) db.background = v end), 34)
+    place(Checkbox(p, "Dark background behind bars", function() return db.background end, function(v) db.background = v end), 26)
+    place(Checkbox(p, "Left-click to target yourself, right-click for your menu",
+        function() return ns.db.clicks.enabled end, function(v) ns.db.clicks.enabled = v end), 34)
 
     local bar = CreateFrame("StatusBar", nil, p)
     bar:SetSize(210, 12)
@@ -235,7 +238,7 @@ function Config:BuildBars(p)
     place(bar, 34, 150)
     updateBar()
 
-    place(Stepper(p, "Border size (0 = off)", 0, 6, 1, function() return db.borderSize end, function(v) db.borderSize = v end), 28)
+    place(Stepper(p, "Border size in pixels (0 = off)", 0, 6, 1, function() return db.borderSize end, function(v) db.borderSize = v end), 28)
     place(ColorSwatch(p, "Border colour", function() return db.borderColor end,
         function(r, g, b) db.borderColor = { r = r, g = g, b = b, a = 1 } end), 40)
 
@@ -253,13 +256,28 @@ function Config:BuildText(p)
     local db, text = ns.db.skin, ns.db.text
     local place = Placer()
 
+    -- The power bar's text can differ by power type; `editing` is the one shown in the boxes.
+    local editing = "default"
+    local POWER_TYPES = Options("default", "Mana, and any other", "RAGE", "Rage", "ENERGY", "Energy")
     for _, bar in ipairs({ { "health", "Health bar text" }, { "power", "Power bar text" } }) do
         local key = bar[1]
-        local slots = db[key .. "Text"]
+        local function Slots()
+            if key == "power" and editing ~= "default" then return db.powerTextFor[editing] end
+            return db[key .. "Text"]
+        end
         place(Label(p, bar[2]), 18)
+        local boxes = {}
+        if key == "power" then
+            place(Dropdown(p, "For", POWER_TYPES, function() return editing end, function(v)
+                editing = v
+                for slot, box in pairs(boxes) do box.eb:SetText(Slots()[slot]) end
+            end), 28, 12)
+        end
         for _, slot in ipairs({ { "left", "Left" }, { "center", "Centre" }, { "right", "Right" } }) do
-            place(TextBox(p, slot[2], function() return slots[slot[1]] end,
-                function(v) slots[slot[1]] = v end), 24, 12)
+            local box = TextBox(p, slot[2], function() return Slots()[slot[1]] end,
+                function(v) Slots()[slot[1]] = v end)
+            boxes[slot[1]] = box
+            place(box, 24, 12)
         end
         place(Stepper(p, "Edge padding", 0, 30, 1, function() return text[key .. "Padding"] end,
             function(v) text[key .. "Padding"] = v end), 24, 8)
@@ -401,6 +419,90 @@ function Config:BuildAuraPage(p, kind)
     refreshList()
 end
 
+function Config:BuildPower(p)
+    local fade, marks = ns.db.fade, ns.db.marks
+    local place = Placer()
+
+    place(Label(p, "Fade when idle"), 22)
+    place(Checkbox(p, "Fade out when out of combat at full health with power at rest",
+        function() return fade.enabled end, function(v) fade.enabled = v end), 26)
+    place(Checkbox(p, "...but stay visible while you have a target",
+        function() return fade.target end, function(v) fade.target = v end), 26, 20)
+    place(Stepper(p, "Faded opacity (%)", 0, 100, 5, function() return math.floor(fade.alpha * 100 + 0.5) end,
+        function(v) fade.alpha = v / 100 end), 26, 20)
+    local note = Label(p, "\"At rest\" is empty for rage, full for mana and energy. Any damage, power "
+        .. "or combat brings it straight back, and it always shows in Edit Mode.", "GameFontDisableSmall")
+    note:SetWidth(W - 40)
+    note:SetJustifyH("LEFT")
+    place(note, 40)
+
+    place(Label(p, "Ability cost marks"), 22)
+    place(Checkbox(p, "Mark ability costs on the power bar",
+        function() return marks.enabled end, function(v) marks.enabled = v end), 26)
+    place(ColorSwatch(p, "Mark colour", function() return marks.color end,
+        function(r, g, b) marks.color = { r = r, g = g, b = b, a = marks.color.a or 0.7 } end), 26)
+    place(Stepper(p, "Mark width (pixels)", 1, 4, 1, function() return marks.width end,
+        function(v) marks.width = v end), 30)
+    local help = Label(p, "A mark shows for each ability below that you know and that costs the power "
+        .. "the bar shows, at its cost. Add one by name (as in your spellbook) or spell ID.", "GameFontDisableSmall")
+    help:SetWidth(W - 40)
+    help:SetJustifyH("LEFT")
+    place(help, 32)
+
+    local list = ScrollList(p, W - 36, 160)
+    local refresh
+    local eb = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
+    eb:SetSize(180, 20)
+    eb:SetAutoFocus(false)
+    place(eb, 28, 6)
+    local add = Button(p, "Add", 60)
+    add:SetPoint("LEFT", eb, "RIGHT", 6, 0)
+    local function Add()
+        local text = strtrim(eb:GetText() or "")
+        local id = tonumber(text)
+        if not id then
+            local info = text ~= "" and C_Spell.GetSpellInfo(text)
+            id = info and info.spellID
+        end
+        if not (id and C_Spell.GetSpellName(id)) then
+            ns.Print("No spell called \"" .. text .. "\" in your spellbook.")
+            return
+        end
+        for _, v in ipairs(marks.spells) do
+            if v == id then return end
+        end
+        table.insert(marks.spells, id)
+        eb:SetText("")
+        refresh()
+        ns.Refresh()
+    end
+    eb:SetScript("OnEnterPressed", function(self)
+        Add()
+        self:ClearFocus()
+    end)
+    eb:SetScript("OnEscapePressed", eb.ClearFocus)
+    add:SetScript("OnClick", Add)
+    place(list, 0)
+
+    function refresh()
+        Fill(list, marks.spells, function(r, id, i)
+            local name, icon = SpellInfo(id)
+            r.icon:SetTexture(icon or 134400)
+            r.text:SetText((name or "Unknown spell") .. " |cff888888(" .. id .. ")|r")
+            if not r.remove then
+                r.remove = Button(r, "X", 24, 20)
+                r.remove:SetPoint("RIGHT", -2, 0)
+            end
+            r.remove:SetScript("OnClick", function()
+                table.remove(marks.spells, i)
+                refresh()
+                ns.Refresh()
+            end)
+        end)
+    end
+    refresh()
+end
+
 -- Lists the auras currently on you, so you can whitelist without knowing IDs.
 function Config:ShowPicker(kind, onAdd)
     if InCombatLockdown() then
@@ -465,7 +567,8 @@ function Config:Build()
         end
         if self.picker then self.picker:Hide() end
     end
-    for i, def in ipairs({ { "bars", "Bars" }, { "text", "Text" }, { "buffs", "Buffs" }, { "debuffs", "Debuffs" } }) do
+    for i, def in ipairs({ { "bars", "Bars" }, { "text", "Text" }, { "buffs", "Buffs" }, { "debuffs", "Debuffs" },
+        { "power", "Fade & marks" } }) do
         local key = def[1]
         local tab = Button(f, def[2], 100)
         tab:SetPoint("TOPLEFT", 14 + (i - 1) * 104, -30)
@@ -481,6 +584,7 @@ function Config:Build()
     self:BuildText(pages.text)
     self:BuildAuraPage(pages.buffs, "buffs")
     self:BuildAuraPage(pages.debuffs, "debuffs")
+    self:BuildPower(pages.power)
     select("bars")
 end
 
@@ -501,5 +605,6 @@ ns.AddOptionsPanel({
     commands = {
         { "/prt", "open or close the settings" },
         { "/prt debug", "report what it finds of the Personal Resource Display" },
+        { "/prt fade", "say whether the display counts as idle, and why not" },
     },
 })
