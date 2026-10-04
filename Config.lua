@@ -46,6 +46,7 @@ local function Stepper(parent, text, min, max, step, get, set)
 
     local function refresh() val:SetText(get()) end
     local function change(d)
+        if IsShiftKeyDown() then d = d * 10 end
         set(math.max(min, math.min(max, get() + d)))
         refresh()
         ns.Refresh()
@@ -247,7 +248,34 @@ function Config:BuildBars(p)
         function(v) db.frameThickness = v end), 28)
     place(Stepper(p, "Border size in pixels (0 = off)", 0, 6, 1, function() return db.borderSize end, function(v) db.borderSize = v end), 28)
     place(ColorSwatch(p, "Border colour", function() return db.borderColor end,
-        function(r, g, b) db.borderColor = { r = r, g = g, b = b, a = 1 } end), 40)
+        function(r, g, b) db.borderColor = { r = r, g = g, b = b, a = 1 } end), 34)
+
+    -- Sizes, in screen pixels; 0 is Edit Mode's. The first + starts from the bar's size now.
+    place(Label(p, "Size (screen pixels; 0 = Edit Mode's)"), 22)
+    local size = db.size
+    local steppers = {}
+    for _, def in ipairs({ { "width", "Width", 600, 2 }, { "health", "Health bar height", 80, 1 },
+        { "power", "Power bar height", 80, 1 }, { "alt", "Mana bar in forms", 80, 1 } }) do
+        local key = def[1]
+        steppers[#steppers + 1] = Stepper(p, def[2], 0, def[3], def[4], function() return size[key] end,
+            function(v)
+                if size[key] == 0 and v > 0 then v = math.min(def[3], ns.Skin:MeasureSize(key) + v) end
+                size[key] = v
+            end)
+        place(steppers[#steppers], 26, 12)
+    end
+    local reset = Button(p, "Use Edit Mode's sizes", 180)
+    reset:SetScript("OnClick", function()
+        for k in pairs(size) do size[k] = 0 end
+        ns.Refresh()
+        for _, st in ipairs(steppers) do st:GetScript("OnShow")(st) end
+    end)
+    place(reset, 26, 12)
+    local sizeNote = Label(p, "Shift-click + or - for 10 at a time. Mana bar in forms at 0 matches the power bar.",
+        "GameFontDisableSmall")
+    sizeNote:SetWidth(W - 40)
+    sizeNote:SetJustifyH("LEFT")
+    place(sizeNote, 30)
 
     local note = Label(p, "Turning the skin off fully restores Blizzard's look after a /reload.", "GameFontDisableSmall")
     note:SetWidth(W - 40)
@@ -519,6 +547,49 @@ function Config:BuildPower(p)
     refresh()
 end
 
+function Config:BuildCombo(p)
+    local cfg = ns.db.combo
+    local place = Placer()
+
+    place(Checkbox(p, "Show combo points (rogues, and druids in cat form)",
+        function() return cfg.enabled end, function(v) cfg.enabled = v end), 30)
+    place(Dropdown(p, "Position", Options("below", "Below the bars", "above", "Above the bars"),
+        function() return cfg.position end, function(v) cfg.position = v end), 30)
+
+    -- Sizes, in screen pixels, like the bars'.
+    place(Label(p, "Size (screen pixels)"), 22)
+    place(Stepper(p, "Height", 4, 40, 1, function() return cfg.height end,
+        function(v) cfg.height = v end), 26, 12)
+    place(Stepper(p, "Point width (0 = span)", 0, 120, 1, function() return cfg.width end,
+        function(v) cfg.width = v end), 26, 12)
+    place(Stepper(p, "Space between points", 0, 20, 1, function() return cfg.spacing end,
+        function(v) cfg.spacing = v end), 26, 12)
+    place(Stepper(p, "Gap from the bars", 0, 40, 1, function() return cfg.gap end,
+        function(v) cfg.gap = v end), 26, 12)
+    local sizeNote = Label(p, "At width 0 the points share the bars' width between them. Spaces are "
+        .. "measured between the borders.", "GameFontDisableSmall")
+    sizeNote:SetWidth(W - 40)
+    sizeNote:SetJustifyH("LEFT")
+    place(sizeNote, 34)
+
+    place(Label(p, "Colour"), 22)
+    place(Checkbox(p, "Class colour", function() return cfg.classColor end,
+        function(v) cfg.classColor = v end), 26)
+    place(ColorSwatch(p, "Own colour", function() return cfg.color end,
+        function(r, g, b) cfg.color = { r = r, g = g, b = b } end), 30, 20)
+    place(Checkbox(p, "A different colour at max points", function() return cfg.maxEnabled end,
+        function(v) cfg.maxEnabled = v end), 26)
+    place(ColorSwatch(p, "Colour at max", function() return cfg.maxColor end,
+        function(r, g, b) cfg.maxColor = { r = r, g = g, b = b } end), 34, 20)
+
+    local note = Label(p, "The points use the Bars page's texture, background and border (style, size "
+        .. "and colour). Forever's display has no combo points of its own, so turning them off "
+        .. "leaves it as Blizzard has it.", "GameFontDisableSmall")
+    note:SetWidth(W - 40)
+    note:SetJustifyH("LEFT")
+    place(note, 44)
+end
+
 -- Lists the auras currently on you, so you can whitelist without knowing IDs.
 function Config:ShowPicker(kind, onAdd)
     if InCombatLockdown() then
@@ -584,10 +655,10 @@ function Config:Build()
         if self.picker then self.picker:Hide() end
     end
     for i, def in ipairs({ { "bars", "Bars" }, { "text", "Text" }, { "buffs", "Buffs" }, { "debuffs", "Debuffs" },
-        { "power", "Fade & marks" } }) do
+        { "power", "Fade & marks" }, { "combo", "Combo" } }) do
         local key = def[1]
-        local tab = Button(f, def[2], 100)
-        tab:SetPoint("TOPLEFT", 14 + (i - 1) * 104, -30)
+        local tab = Button(f, def[2], 84)
+        tab:SetPoint("TOPLEFT", 14 + (i - 1) * 87, -30)
         tab:SetScript("OnClick", function() select(key) end)
         tabs[key] = tab
         local page = CreateFrame("Frame", nil, f)
@@ -601,6 +672,7 @@ function Config:Build()
     self:BuildAuraPage(pages.buffs, "buffs")
     self:BuildAuraPage(pages.debuffs, "debuffs")
     self:BuildPower(pages.power)
+    self:BuildCombo(pages.combo)
     select("bars")
 end
 
@@ -614,7 +686,7 @@ function Config:Toggle()
 end
 
 -- Its entry in the game's Options > AddOns list (Options.lua).
-ns.AddOptionsPanel({
+FrogLib.Options.Add("PersonalResourceTweaks", ns, {
     open = function()
         if not (Config.frame and Config.frame:IsShown()) then Config:Toggle() end
     end,

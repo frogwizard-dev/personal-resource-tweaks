@@ -186,16 +186,18 @@ local function BuffRowHeight()
     return b.offsetY + lines * (b.size + b.spacing) - b.spacing
 end
 
--- Buffs sit directly on top of the health bar, debuffs above the buffs.
+-- Buffs sit directly on top of the health bar (or on the combo points, when they're above it),
+-- debuffs above the buffs.
 function Auras:Anchor()
     local parent = ns.Skin.prd or UIParent
     local anchor, point = ns.Skin.health, "TOP"
     if not anchor then
         anchor, point = UIParent, "CENTER"
     end
+    local combo = ns.Combo:SpaceAbove()
     local offsets = {
-        buffs = ns.db.buffs.offsetY,
-        debuffs = BuffRowHeight() + ns.db.debuffs.offsetY,
+        buffs = combo + ns.db.buffs.offsetY,
+        debuffs = combo + BuffRowHeight() + ns.db.debuffs.offsetY,
     }
     for kind, c in pairs(containers) do
         c:SetParent(parent)

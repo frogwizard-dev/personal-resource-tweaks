@@ -11,6 +11,9 @@ ns.defaults = {
         -- "forever" (the cooldown manager's bar frame).
         borderStyle = "pixel",
         frameThickness = 1, -- the forever border: screen pixels per pixel of its art (1 to 3)
+        -- Bar sizes in screen pixels, over Edit Mode's (Skin.lua); 0 keeps Edit Mode's. alt: the
+        -- druid's mana bar in forms (0 = as tall as the power bar).
+        size = { width = 0, health = 0, power = 0, alt = 0 },
         borderColor = { r = 0, g = 0, b = 0, a = 1 },
         -- Text templates per slot; see Compile in Skin.lua. Empty = hidden.
         healthText = { left = "", center = "value (percent)", right = "" },
@@ -35,6 +38,14 @@ ns.defaults = {
     marks = { enabled = true, width = 1, color = { r = 1, g = 1, b = 1, a = 0.7 }, spells = {} },
     -- The five-second rule: a strip under your mana bar until mana regen starts again (Power.lua).
     regen = { enabled = true, color = { r = 0.55, g = 0.85, b = 1.00 } },
+    -- Combo points as a row of pips in the bars' texture and border (Combo.lua). Sizes in screen
+    -- pixels: width 0 spans the bars; gap is from the bars, spacing between pips (both measured
+    -- between borders). position: "below" or "above" the bars. maxColor: all pips at max points.
+    combo = {
+        enabled = true, position = "below", gap = 3, height = 8, width = 0, spacing = 2,
+        classColor = true, color = { r = 1, g = 0.82, b = 0.2 },
+        maxEnabled = false, maxColor = { r = 1, g = 0.3, b = 0.2 },
+    },
     text = {
         font = "Fonts\\FRIZQT__.TTF",
         outline = "OUTLINE",
@@ -85,6 +96,7 @@ function ns.Refresh()
     ns.Auras:Apply()
     if ns.Clicks.initialised then ns.Clicks:Place() end
     if ns.Power.initialised then ns.Power:Apply() end
+    if ns.Combo.initialised then ns.Combo:Apply() end
 end
 
 local f = CreateFrame("Frame")
@@ -151,6 +163,8 @@ f:SetScript("OnEvent", function(_, event, arg1)
         ns.Clicks.initialised = true
         ns.Power:Init()
         ns.Power.initialised = true
+        ns.Combo:Init()
+        ns.Combo.initialised = true
     end
 end)
 

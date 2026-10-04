@@ -79,7 +79,7 @@ end
 -- interface units come out as fractions of a pixel at most UI and nameplate scales (and a
 -- fraction gets rounded differently on each side), so each edge is sized in whole pixels and the
 -- engine keeps its layout on the pixel grid, as Blizzard's own nameplate borders do.
-local EDGES = { "Top", "Bottom", "Left", "Right" }
+local Borders = FrogLib.Borders
 
 local function Snap(region)
     if region.SetRoundLayoutToNearestPixel then region:SetRoundLayoutToNearestPixel(true) end
@@ -93,85 +93,14 @@ local function PlaceBorder(bar)
     local b = bar.prtBorder
     local size = ns.db.skin.borderSize
     if not b or size <= 0 then return end
-    -- size pixels, in the border's own units.
-    local t = size * (768 / select(2, GetPhysicalScreenSize())) / b:GetEffectiveScale()
-    local e = b.edges
-    e.Top:ClearAllPoints()
-    e.Top:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", -t, 0)
-    e.Top:SetPoint("BOTTOMRIGHT", bar, "TOPRIGHT", t, 0)
-    e.Top:SetHeight(t)
-    e.Bottom:ClearAllPoints()
-    e.Bottom:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", -t, 0)
-    e.Bottom:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", t, 0)
-    e.Bottom:SetHeight(t)
-    e.Left:ClearAllPoints()
-    e.Left:SetPoint("TOPRIGHT", bar, "TOPLEFT", 0, 0)
-    e.Left:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT", 0, 0)
-    e.Left:SetWidth(t)
-    e.Right:ClearAllPoints()
-    e.Right:SetPoint("TOPLEFT", bar, "TOPRIGHT", 0, 0)
-    e.Right:SetPoint("BOTTOMLEFT", bar, "BOTTOMRIGHT", 0, 0)
-    e.Right:SetWidth(t)
+    b.edges:Place(size, 0)
 end
 
--- The other two border styles (skin.borderStyle; "pixel" is the edges above):
+-- The other two border styles (skin.borderStyle; "pixel" is the edges above), both FrogLib's:
 --   "classic": the grey stone border tooltips and old frames use, just outside the bar;
---   "forever": a Forever-style frame of our own (below).
-local STONE = "Interface\\Tooltips\\UI-Tooltip-Border"
--- The Forever frame: our own (Media\ForeverFrame.tga, 16x16), in the style of Forever's bar
--- frames: a dark outline, a light metallic rim brighter along the top, and a dark inner line,
--- each one screen pixel wide, with the corners cut. Nine-sliced at one texel per screen pixel, so
--- it's crisp at any bar size and nothing stretches but its straight edges. It sits 2 pixels out
--- from the bar, its inner line over the fill's edge, so the fill sits inside it.
-local FRAME_FILE = "Interface\\AddOns\\PersonalResourceTweaks\\Media\\ForeverFrame.tga"
-local FRAME_SIZE, FRAME_SLICE, FRAME_OUT = 16, 3, 2
-local FRAME_KEYS = { "tl", "t", "tr", "l", "r", "bl", "b", "br" }
-
-local function FrameArt(bar)
-    local p = {}
-    for _, key in ipairs(FRAME_KEYS) do
-        local t = bar:CreateTexture(nil, "OVERLAY", nil, 5)
-        t:SetTexture(FRAME_FILE, nil, nil, "NEAREST")
-        if t.SetSnapToPixelGrid then
-            t:SetSnapToPixelGrid(false)
-            t:SetTexelSnappingBias(0)
-        end
-        p[key] = t
-    end
-    return p
-end
-
--- thickness: screen pixels per texel (1 to 3), a whole number so it stays crisp.
-local function PlaceFrameArt(p, bar, thickness)
-    local px = (thickness or 1) * 768 / select(2, GetPhysicalScreenSize()) / bar:GetEffectiveScale()
-    local m, out = FRAME_SLICE * px, FRAME_OUT * px
-    local a, b = FRAME_SLICE / FRAME_SIZE, (FRAME_SIZE - FRAME_SLICE) / FRAME_SIZE
-    p.tl:SetTexCoord(0, a, 0, a)
-    p.t:SetTexCoord(a, b, 0, a)
-    p.tr:SetTexCoord(b, 1, 0, a)
-    p.l:SetTexCoord(0, a, a, b)
-    p.r:SetTexCoord(b, 1, a, b)
-    p.bl:SetTexCoord(0, a, b, 1)
-    p.b:SetTexCoord(a, b, b, 1)
-    p.br:SetTexCoord(b, 1, b, 1)
-    for _, t in pairs(p) do t:ClearAllPoints() end
-    p.tl:SetPoint("TOPLEFT", bar, "TOPLEFT", -out, out)
-    p.tr:SetPoint("TOPRIGHT", bar, "TOPRIGHT", out, out)
-    p.bl:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -out, -out)
-    p.br:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", out, -out)
-    for _, key in ipairs({ "tl", "tr", "bl", "br" }) do p[key]:SetSize(m, m) end
-    p.t:SetPoint("TOPLEFT", p.tl, "TOPRIGHT")
-    p.t:SetPoint("BOTTOMRIGHT", p.tr, "BOTTOMLEFT")
-    p.b:SetPoint("TOPLEFT", p.bl, "TOPRIGHT")
-    p.b:SetPoint("BOTTOMRIGHT", p.br, "BOTTOMLEFT")
-    p.l:SetPoint("TOPLEFT", p.tl, "BOTTOMLEFT")
-    p.l:SetPoint("BOTTOMRIGHT", p.bl, "TOPRIGHT")
-    p.r:SetPoint("TOPLEFT", p.tr, "BOTTOMLEFT")
-    p.r:SetPoint("BOTTOMRIGHT", p.br, "TOPRIGHT")
-end
-
+--   "forever": our Forever-style frame, on the bar over the fill's edge (thickness 1 to 3).
 local function PlaceFrame(bar)
-    if bar.prtFrame then PlaceFrameArt(bar.prtFrame, bar, ns.db.skin.frameThickness) end
+    if bar.prtFrame then bar.prtFrame:Place(ns.db.skin.frameThickness) end
 end
 
 local function Decorate(bar)
@@ -184,23 +113,15 @@ local function Decorate(bar)
         local b = CreateFrame("Frame", nil, bar)
         b:SetAllPoints()
         Snap(b)
-        b.edges = {}
-        for _, key in ipairs(EDGES) do
-            local edge = b:CreateTexture(nil, "OVERLAY")
-            Snap(edge)
-            b.edges[key] = edge
-        end
+        b.edges = Borders.Edges(b, bar, "OVERLAY")
+        for _, key in ipairs({ "top", "bottom", "left", "right" }) do Snap(b.edges[key]) end
         bar.prtBorder = b
         -- Classic: the stone border, on a frame round the bar.
-        bar.prtStone = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-        bar.prtStone:SetPoint("TOPLEFT", bar, "TOPLEFT", -3, 3)
-        bar.prtStone:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 3, -3)
-        bar.prtStone:SetBackdrop({ edgeFile = STONE, edgeSize = 12 })
-        bar.prtStone:SetBackdropBorderColor(0.75, 0.75, 0.75, 1)
+        bar.prtStone = Borders.Stone(bar, 1)
         -- Forever: our Forever-style frame, on the bar itself, over the fill's edge.
-        bar.prtFrame = FrameArt(bar)
+        bar.prtFrame = Borders.Forever(bar, "OVERLAY", 5)
         -- The skin hides every other unnamed texture on the bar.
-        for _, t in pairs(bar.prtFrame) do t.prtOwned = true end
+        for _, t in pairs(bar.prtFrame:Textures()) do t.prtOwned = true end
         -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale), and
         -- the frame follows the bar's height.
         bar:HookScript("OnSizeChanged", PlaceBorder)
@@ -208,14 +129,14 @@ local function Decorate(bar)
     end
     local size, c = db.borderSize, db.borderColor
     local b = bar.prtBorder
-    for _, edge in pairs(b.edges) do edge:SetColorTexture(c.r, c.g, c.b, c.a or 1) end
+    b.edges:SetColor(c)
     PlaceBorder(bar)
     PlaceFrame(bar)
     local style = db.borderStyle
     bar.prtBg:SetShown(db.enabled and db.background)
     b:SetShown(db.enabled and size > 0 and style == "pixel")
     bar.prtStone:SetShown(db.enabled and style == "classic")
-    for _, t in pairs(bar.prtFrame) do t:SetShown(db.enabled and style == "forever") end
+    bar.prtFrame:SetShown(db.enabled and style == "forever")
 end
 
 local function HideBlizzardArt(prd, health, power, alt)
@@ -376,6 +297,59 @@ local function SetFonts(texts, size)
     end
 end
 
+-- Our own bar sizes (skin.size), set over Edit Mode's each time it sets its own. In screen pixels,
+-- so they stay crisp whatever Edit Mode's "Size" scale is.
+local sizing, sized = false, {}
+
+local function PixelUnit(frame)
+    return (768 / select(2, GetPhysicalScreenSize())) / frame:GetEffectiveScale()
+end
+
+-- A bar's current size in screen pixels (for the settings to start from).
+function Skin:MeasureSize(key)
+    local prd = self.prd
+    if not prd then return 0 end
+    local frame = key == "width" and prd or key == "health" and prd.HealthBarsContainer
+        or key == "power" and prd.PowerBar or prd.AlternatePowerBar
+    if not frame then return 0 end
+    local units = key == "width" and frame:GetWidth() or frame:GetHeight()
+    return math.floor(units / PixelUnit(frame) + 0.5)
+end
+
+function Skin:ApplySize()
+    local prd = self.prd
+    if not prd or sizing then return end
+    if InCombatLockdown() and prd:IsProtected() then return end -- PLAYER_REGEN_ENABLED tries again
+    local s, unit = ns.db.skin.size, PixelUnit(prd)
+    sizing = true
+    local container, power, alt = prd.HealthBarsContainer, prd.PowerBar, prd.AlternatePowerBar
+    if s.width > 0 then
+        local w = s.width * unit
+        prd:SetWidth(w)
+        for _, f in ipairs({ container, power, alt, prd.ClassFrameContainer }) do
+            if f then f:SetWidth(w) end
+        end
+    elseif sized.width and prd.UpdateBarWidth then
+        prd:UpdateBarWidth() -- back to Edit Mode's
+    end
+    if s.health > 0 and container then
+        container:SetHeight(s.health * unit)
+    elseif sized.health and prd.UpdateSystemSettingHealthBarHeight then
+        pcall(prd.UpdateSystemSettingHealthBarHeight, prd)
+    end
+    local altHeight = s.alt > 0 and s.alt or s.power
+    if s.power > 0 and power then power:SetHeight(s.power * unit) end
+    if altHeight > 0 and alt then alt:SetHeight(altHeight * unit) end
+    if (sized.power and s.power == 0) or (sized.alt and altHeight == 0) then
+        if prd.UpdateSystemSettingPowerBarHeight then pcall(prd.UpdateSystemSettingPowerBarHeight, prd) end
+        if s.power > 0 and power then power:SetHeight(s.power * unit) end
+        if altHeight > 0 and alt then alt:SetHeight(altHeight * unit) end
+    end
+    sized.width, sized.health, sized.power, sized.alt = s.width > 0, s.health > 0, s.power > 0, altHeight > 0
+    if prd.UpdateFrameHeight then prd:UpdateFrameHeight() end
+    sizing = false
+end
+
 function Skin:Apply()
     local prd, health, power, alt = self:Find()
     self.prd, self.health, self.alt = prd, health, alt
@@ -386,7 +360,12 @@ function Skin:Apply()
         prd:HookScript("OnShow", function() ns.Refresh() end)
         -- Edit Mode's size for the display is a scale, which moves the border off whole pixels.
         hooksecurefunc(prd, "SetScale", function() ns.Refresh() end)
+        -- Edit Mode setting its own sizes: put ours back over them.
+        for _, method in ipairs({ "UpdateBarWidth", "SetHealthBarHeight", "SetPowerBarHeight" }) do
+            if prd[method] then hooksecurefunc(prd, method, function() Skin:ApplySize() end) end
+        end
     end
+    self:ApplySize()
 
     local t = ns.db.text
     if health then
@@ -433,6 +412,7 @@ function Skin:Init()
     ev:RegisterUnitEvent("UNIT_MAXPOWER", "player")
     ev:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
     ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev:SetScript("OnEvent", function(_, event)
         if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
             UpdateHealthText()
@@ -441,6 +421,8 @@ function Skin:Init()
             UpdatePowerText()
             UpdateAltText()
             if event == "UNIT_DISPLAYPOWER" or event == "UPDATE_SHAPESHIFT_FORM" then self:UpdateAltShown() end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            self:ApplySize()
         else
             ns.Refresh()
         end
@@ -474,4 +456,5 @@ function Skin:Debug()
     end
     walk(prd, 1)
     ns.Auras:Debug()
+    ns.Combo:Debug()
 end

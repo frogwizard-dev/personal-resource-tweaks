@@ -1,5 +1,15 @@
 # PersonalResourceTweaks
 
+## 0.8.0
+
+### Bar sizes
+- Set the display's width and each bar's height exactly, in screen pixels, on the Bars page: health, power, and the mana bar druids get in forms (which otherwise matches the power bar). They go beyond Edit Mode's sliders, stay crisp whatever Edit Mode's "Size" is, and 0 keeps Edit Mode's own; "Use Edit Mode's sizes" puts them all back.
+- Shift-click a setting's + or - to change it ten steps at a time.
+
+### Combo points
+- Rogues, and druids in cat form, get their combo points on the display: a row of flat points in the bars' texture, background and border (pixel, classic stone or Forever, with the same size, colour and thickness), lit as you build them on your target. Forever's display had no combo points of its own.
+- Settings on the new Combo page: below or above the bars (the buffs move up to make room), the gap from the bars, the points' height, their width (0 shares the bars' width between them) and the space between them, all in screen pixels; class colour or your own, and optionally a different colour once you have them all.
+
 ## 0.7.0
 
 ### Border styles
