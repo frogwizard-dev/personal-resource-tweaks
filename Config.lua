@@ -3,7 +3,7 @@ local Config = {}
 ns.Config = Config
 
 local issecret = ns.issecret
-local W, H = 550, 700
+local W, H = 550, 760
 local ROW_H = 26
 
 local function Label(parent, text, template)
@@ -216,6 +216,8 @@ function Config:BuildBars(p)
     place(Checkbox(p, "Skin the Personal Resource Display", function() return db.enabled end, function(v) db.enabled = v end), 30)
     place(Checkbox(p, "Class-coloured health bar", function() return db.classColor end, function(v) db.classColor = v end), 26)
     place(Checkbox(p, "Dark background behind bars", function() return db.background end, function(v) db.background = v end), 26)
+    place(Dropdown(p, "Mana bar in forms", Options("form", "Only in a form", "always", "Always",
+        "never", "Never"), function() return db.altShow end, function(v) db.altShow = v end), 30)
     place(Checkbox(p, "Left-click to target yourself, right-click for your menu",
         function() return ns.db.clicks.enabled end, function(v) ns.db.clicks.enabled = v end), 34)
 
@@ -238,6 +240,11 @@ function Config:BuildBars(p)
     place(bar, 34, 150)
     updateBar()
 
+    place(Dropdown(p, "Border", Options("pixel", "Pixel (size and colour below)", "classic", "Classic stone",
+        "forever", "Forever (cooldown manager frame)"), function() return db.borderStyle end,
+        function(v) db.borderStyle = v end), 30)
+    place(Stepper(p, "Forever border thickness", 1, 3, 1, function() return db.frameThickness end,
+        function(v) db.frameThickness = v end), 28)
     place(Stepper(p, "Border size in pixels (0 = off)", 0, 6, 1, function() return db.borderSize end, function(v) db.borderSize = v end), 28)
     place(ColorSwatch(p, "Border colour", function() return db.borderColor end,
         function(r, g, b) db.borderColor = { r = r, g = g, b = b, a = 1 } end), 40)
@@ -258,10 +265,12 @@ function Config:BuildText(p)
 
     -- The power bar's text can differ by power type; `editing` is the one shown in the boxes.
     local editing = "default"
-    local POWER_TYPES = Options("default", "Mana, and any other", "RAGE", "Rage", "ENERGY", "Energy")
+    local POWER_TYPES = Options("default", "Mana, and any other", "RAGE", "Rage", "ENERGY", "Energy",
+        "ALT", "Mana bar in forms (druids)")
     for _, bar in ipairs({ { "health", "Health bar text" }, { "power", "Power bar text" } }) do
         local key = bar[1]
         local function Slots()
+            if key == "power" and editing == "ALT" then return db.altText end
             if key == "power" and editing ~= "default" then return db.powerTextFor[editing] end
             return db[key .. "Text"]
         end
@@ -435,6 +444,13 @@ function Config:BuildPower(p)
     note:SetWidth(W - 40)
     note:SetJustifyH("LEFT")
     place(note, 40)
+
+    local regen = ns.db.regen
+    place(Label(p, "Mana regen"), 22)
+    place(Checkbox(p, "Show when mana regen starts again (the five-second rule)",
+        function() return regen.enabled end, function(v) regen.enabled = v end), 26)
+    place(ColorSwatch(p, "Its colour", function() return regen.color end,
+        function(r, g, b) regen.color = { r = r, g = g, b = b } end), 30, 20)
 
     place(Label(p, "Ability cost marks"), 22)
     place(Checkbox(p, "Mark ability costs on the power bar",

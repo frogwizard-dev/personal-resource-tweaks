@@ -7,12 +7,20 @@ ns.defaults = {
         classColor = true,
         background = true,
         borderSize = 1,
+        -- "pixel" (borderSize pixels in borderColor), "classic" (the grey stone border) or
+        -- "forever" (the cooldown manager's bar frame).
+        borderStyle = "pixel",
+        frameThickness = 1, -- the forever border: screen pixels per pixel of its art (1 to 3)
         borderColor = { r = 0, g = 0, b = 0, a = 1 },
         -- Text templates per slot; see Compile in Skin.lua. Empty = hidden.
         healthText = { left = "", center = "value (percent)", right = "" },
         powerText = { left = "", center = "value", right = "" },
         -- Its own text for these power types (mana and anything else use powerText). Rage and
         -- energy top out at 100, so their percent only repeats the number.
+        -- The mana bar druids get in a form (Blizzard's third bar): its text, and when it shows:
+        -- "always", "form" (only while your main bar isn't mana) or "never".
+        altText = { left = "", center = "value", right = "" },
+        altShow = "form",
         powerTextFor = {
             RAGE = { left = "", center = "value", right = "" },
             ENERGY = { left = "", center = "value", right = "" },
@@ -25,6 +33,8 @@ ns.defaults = {
     -- for the ones you know that cost the bar's power. (Seeded once, below: as a default here,
     -- spells you remove would come back at the next login.)
     marks = { enabled = true, width = 1, color = { r = 1, g = 1, b = 1, a = 0.7 }, spells = {} },
+    -- The five-second rule: a strip under your mana bar until mana regen starts again (Power.lua).
+    regen = { enabled = true, color = { r = 0.55, g = 0.85, b = 1.00 } },
     text = {
         font = "Fonts\\FRIZQT__.TTF",
         outline = "OUTLINE",
@@ -124,6 +134,10 @@ f:SetScript("OnEvent", function(_, event, arg1)
             local slots = {}
             for slot, s in pairs(db.skin.powerText) do slots[slot] = NoPercent(s) end
             db.skin.powerTextFor = { RAGE = CopyTable(slots), ENERGY = CopyTable(slots) }
+        end
+        -- 0.6 adds text to the in-form mana bar: it starts as the power text (mana's).
+        if db.skin and db.skin.powerText and not db.skin.altText then
+            db.skin.altText = CopyTable(db.skin.powerText)
         end
         local firstMarks = db.marks == nil
         CopyDefaults(ns.defaults, db)

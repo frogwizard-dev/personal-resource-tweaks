@@ -114,6 +114,66 @@ local function PlaceBorder(bar)
     e.Right:SetWidth(t)
 end
 
+-- The other two border styles (skin.borderStyle; "pixel" is the edges above):
+--   "classic": the grey stone border tooltips and old frames use, just outside the bar;
+--   "forever": a Forever-style frame of our own (below).
+local STONE = "Interface\\Tooltips\\UI-Tooltip-Border"
+-- The Forever frame: our own (Media\ForeverFrame.tga, 16x16), in the style of Forever's bar
+-- frames: a dark outline, a light metallic rim brighter along the top, and a dark inner line,
+-- each one screen pixel wide, with the corners cut. Nine-sliced at one texel per screen pixel, so
+-- it's crisp at any bar size and nothing stretches but its straight edges. It sits 2 pixels out
+-- from the bar, its inner line over the fill's edge, so the fill sits inside it.
+local FRAME_FILE = "Interface\\AddOns\\PersonalResourceTweaks\\Media\\ForeverFrame.tga"
+local FRAME_SIZE, FRAME_SLICE, FRAME_OUT = 16, 3, 2
+local FRAME_KEYS = { "tl", "t", "tr", "l", "r", "bl", "b", "br" }
+
+local function FrameArt(bar)
+    local p = {}
+    for _, key in ipairs(FRAME_KEYS) do
+        local t = bar:CreateTexture(nil, "OVERLAY", nil, 5)
+        t:SetTexture(FRAME_FILE, nil, nil, "NEAREST")
+        if t.SetSnapToPixelGrid then
+            t:SetSnapToPixelGrid(false)
+            t:SetTexelSnappingBias(0)
+        end
+        p[key] = t
+    end
+    return p
+end
+
+-- thickness: screen pixels per texel (1 to 3), a whole number so it stays crisp.
+local function PlaceFrameArt(p, bar, thickness)
+    local px = (thickness or 1) * 768 / select(2, GetPhysicalScreenSize()) / bar:GetEffectiveScale()
+    local m, out = FRAME_SLICE * px, FRAME_OUT * px
+    local a, b = FRAME_SLICE / FRAME_SIZE, (FRAME_SIZE - FRAME_SLICE) / FRAME_SIZE
+    p.tl:SetTexCoord(0, a, 0, a)
+    p.t:SetTexCoord(a, b, 0, a)
+    p.tr:SetTexCoord(b, 1, 0, a)
+    p.l:SetTexCoord(0, a, a, b)
+    p.r:SetTexCoord(b, 1, a, b)
+    p.bl:SetTexCoord(0, a, b, 1)
+    p.b:SetTexCoord(a, b, b, 1)
+    p.br:SetTexCoord(b, 1, b, 1)
+    for _, t in pairs(p) do t:ClearAllPoints() end
+    p.tl:SetPoint("TOPLEFT", bar, "TOPLEFT", -out, out)
+    p.tr:SetPoint("TOPRIGHT", bar, "TOPRIGHT", out, out)
+    p.bl:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -out, -out)
+    p.br:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", out, -out)
+    for _, key in ipairs({ "tl", "tr", "bl", "br" }) do p[key]:SetSize(m, m) end
+    p.t:SetPoint("TOPLEFT", p.tl, "TOPRIGHT")
+    p.t:SetPoint("BOTTOMRIGHT", p.tr, "BOTTOMLEFT")
+    p.b:SetPoint("TOPLEFT", p.bl, "TOPRIGHT")
+    p.b:SetPoint("BOTTOMRIGHT", p.br, "BOTTOMLEFT")
+    p.l:SetPoint("TOPLEFT", p.tl, "BOTTOMLEFT")
+    p.l:SetPoint("BOTTOMRIGHT", p.bl, "TOPRIGHT")
+    p.r:SetPoint("TOPLEFT", p.tr, "BOTTOMLEFT")
+    p.r:SetPoint("BOTTOMRIGHT", p.br, "TOPRIGHT")
+end
+
+local function PlaceFrame(bar)
+    if bar.prtFrame then PlaceFrameArt(bar.prtFrame, bar, ns.db.skin.frameThickness) end
+end
+
 local function Decorate(bar)
     local db = ns.db.skin
     if not bar.prtBg then
@@ -131,15 +191,31 @@ local function Decorate(bar)
             b.edges[key] = edge
         end
         bar.prtBorder = b
-        -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale).
+        -- Classic: the stone border, on a frame round the bar.
+        bar.prtStone = CreateFrame("Frame", nil, bar, "BackdropTemplate")
+        bar.prtStone:SetPoint("TOPLEFT", bar, "TOPLEFT", -3, 3)
+        bar.prtStone:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 3, -3)
+        bar.prtStone:SetBackdrop({ edgeFile = STONE, edgeSize = 12 })
+        bar.prtStone:SetBackdropBorderColor(0.75, 0.75, 0.75, 1)
+        -- Forever: our Forever-style frame, on the bar itself, over the fill's edge.
+        bar.prtFrame = FrameArt(bar)
+        -- The skin hides every other unnamed texture on the bar.
+        for _, t in pairs(bar.prtFrame) do t.prtOwned = true end
+        -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale), and
+        -- the frame follows the bar's height.
         bar:HookScript("OnSizeChanged", PlaceBorder)
+        bar:HookScript("OnSizeChanged", PlaceFrame)
     end
     local size, c = db.borderSize, db.borderColor
     local b = bar.prtBorder
     for _, edge in pairs(b.edges) do edge:SetColorTexture(c.r, c.g, c.b, c.a or 1) end
     PlaceBorder(bar)
+    PlaceFrame(bar)
+    local style = db.borderStyle
     bar.prtBg:SetShown(db.enabled and db.background)
-    b:SetShown(db.enabled and size > 0)
+    b:SetShown(db.enabled and size > 0 and style == "pixel")
+    bar.prtStone:SetShown(db.enabled and style == "classic")
+    for _, t in pairs(bar.prtFrame) do t:SetShown(db.enabled and style == "forever") end
 end
 
 local function HideBlizzardArt(prd, health, power, alt)
@@ -232,6 +308,44 @@ local function UpdatePowerText()
         UnitPower("player", pType), UnitPowerMax("player", pType), PowerPercent(pType))
 end
 
+-- The third bar: Blizzard's mana bar for druids in a form (and Shadow priests), which shows
+-- your mana while your main bar shows rage or energy.
+local MANA = (Enum.PowerType and Enum.PowerType.Mana) or 0
+
+local function UpdateAltText()
+    if not Skin.altTexts then return end
+    SetBarTexts(Skin.altTexts, ns.db.skin.altText,
+        UnitPower("player", MANA), UnitPowerMax("player", MANA), PowerPercent(MANA))
+end
+
+-- Whether it should show: "always" (as Blizzard has it), "form" (only while your main bar isn't
+-- mana; in caster form it just repeats it) or "never".
+local function AltWanted()
+    local mode = ns.db.skin.altShow
+    if mode == "never" then return false end
+    if mode == "form" then return UnitPowerType("player") ~= MANA end
+    return true
+end
+
+-- Blizzard shows the bar whenever it re-checks it; hidden again right after when it's not wanted.
+-- Shown only where Blizzard would show it (the class and spec it's for).
+function Skin:UpdateAltShown()
+    local alt = self.alt
+    if not alt then return end
+    if not alt.prtShowHooked then
+        alt.prtShowHooked = true
+        hooksecurefunc(alt, "Show", function(bar)
+            if not AltWanted() then bar:Hide() end
+        end)
+    end
+    local wanted = AltWanted() and alt.alternatePowerRequirementsMet and not (self.prd and self.prd.hideAltPower)
+    if wanted and not alt:IsShown() then
+        alt:Show()
+    elseif not wanted and alt:IsShown() then
+        alt:Hide()
+    end
+end
+
 local function BarTexts(bar)
     local texts = {}
     for _, slot in ipairs(SLOTS) do
@@ -264,7 +378,7 @@ end
 
 function Skin:Apply()
     local prd, health, power, alt = self:Find()
-    self.prd, self.health = prd, health
+    self.prd, self.health, self.alt = prd, health, alt
     if not prd then return end
 
     if not prd.prtHooked then
@@ -290,6 +404,13 @@ function Skin:Apply()
         PositionTexts(self.powerTexts, power, t.powerPadding, t.powerNudge)
         UpdatePowerText()
     end
+    if alt then
+        self.altTexts = self.altTexts or BarTexts(alt)
+        SetFonts(self.altTexts, t.powerSize)
+        PositionTexts(self.altTexts, alt, t.powerPadding, t.powerNudge)
+        UpdateAltText()
+        self:UpdateAltShown()
+    end
     for _, bar in pairs({ power, alt }) do
         Hook(bar, nil)
         Decorate(bar)
@@ -311,11 +432,15 @@ function Skin:Init()
     ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     ev:RegisterUnitEvent("UNIT_MAXPOWER", "player")
     ev:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
+    ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
     ev:SetScript("OnEvent", function(_, event)
         if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
             UpdateHealthText()
-        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
+        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER"
+            or event == "UPDATE_SHAPESHIFT_FORM" then
             UpdatePowerText()
+            UpdateAltText()
+            if event == "UNIT_DISPLAYPOWER" or event == "UPDATE_SHAPESHIFT_FORM" then self:UpdateAltShown() end
         else
             ns.Refresh()
         end

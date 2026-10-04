@@ -16,7 +16,12 @@ local BUILTIN = {
     },
 }
 
-local GROUPS = { "Blizzard", "EllesmereUI", "Shared media" }
+-- FrogUI's own bar textures (flat and matte, made for it), listed wherever FrogUI is loaded.
+local FROG_BARS = "Interface\\AddOns\\FrogUI\\Media\\Bars\\"
+local FROG_BAR_NAMES = { "Matte", "Soft", "Grain", "Satin", "Inset", "Brushed", "Stripes",
+    "Dark Matte", "Dark Soft", "Dark Grain", "Dark Inset" }
+
+local GROUPS = { "Frog", "Blizzard", "EllesmereUI", "Shared media" }
 
 -- Everything available right now, grouped for the dropdowns and de-duplicated by path.
 -- Built fresh each time so media registered by addons that load late still shows up.
@@ -29,6 +34,10 @@ function Media:List(kind)
         table.insert(buckets[group], { name = name, path = path })
     end
 
+    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    if kind == "statusbar" and isLoaded and isLoaded("FrogUI") then
+        for _, name in ipairs(FROG_BAR_NAMES) do add("Frog", name, FROG_BARS .. name .. ".tga") end
+    end
     for _, m in ipairs(BUILTIN[kind]) do
         add("Blizzard", m.name, m.path)
     end

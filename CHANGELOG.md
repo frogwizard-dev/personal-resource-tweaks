@@ -1,5 +1,19 @@
 # PersonalResourceTweaks
 
+## 0.7.0
+
+### Border styles
+- A choice of border on the Bars page: **Pixel** (as before: a crisp line, its size and colour yours), **Classic stone** (the grey stone border old frames and tooltips use) or **Forever** (a frame in the style of Forever's bars: a dark outline, a thin metallic rim and cut corners, crisp at any size, 1 to 3 pixels thick).
+
+### Mana bar in forms
+- The mana bar druids get in a form has text now, like the other bars (Text page, "For": "Mana bar in forms"); it starts as your mana bar's text. A new Bars setting decides when it shows: only in a form (the default; in caster form it just repeated your mana), always, or never.
+
+### Mana regen
+- After you spend mana, a thin strip fills along under your mana bar for the five seconds until your mana regen starts again, with a spark at its tip. It follows whichever bar shows your mana: the main one, or the form's mana bar while a druid is in a form. Turn it off or recolour it on the Fade & marks page.
+
+### Options
+- Listed with the rest of Frog Wizard's add-ons: under a "Frog Wizard" heading in the AddOn list, and in its own "Frog Wizard" section of Options > AddOns, whose page lists them all with a button to each one's settings.
+
 ## 0.6.0
 
 ### Power bar

@@ -7,26 +7,37 @@ local issecret = ns.issecret
 ------------------------------------------------------------------------------
 -- Fade when idle: out of combat, at full health, with your power at rest (rage empty, mana or
 -- energy full) and, optionally, no target, the display fades out; anything else brings it back.
--- Values that are secret count as "not idle", so it never hides when it can't tell.
+-- Health and power the game keeps secret can't be compared with their maximum, so for those it
+-- watches them instead: out of combat they tick (regen, rage decay) until they're full or empty
+-- and then stop, so a few quiet seconds mean they've settled.
 ------------------------------------------------------------------------------
 
 -- Power that sits at empty when you're resting (it builds up in combat), rather than full.
 local EMPTY_AT_REST = { RAGE = true, RUNIC_POWER = true, LUNAR_POWER = true, MAELSTROM = true,
     INSANITY = true, FURY = true, PAIN = true }
 local SPEED_IN, SPEED_OUT = 6, 2 -- opacity per second: back in a sixth of a second, out in half
+local SETTLE = 4 -- quiet seconds after which a secret health or power counts as settled
+local lastChange = { health = 0, power = 0 }
 
--- Idle or not, and why not (for /prt fade). Health or power the game keeps secret is skipped
--- rather than counted against idling: out of combat both settle by themselves.
+local function Settled(kind) return GetTime() - lastChange[kind] >= SETTLE end
+
+-- Idle or not, and why not (for /prt fade).
 local function Idle()
     local cfg = ns.db.fade
     if InCombatLockdown() or UnitAffectingCombat("player") then return false, "in combat" end
     if cfg.target and UnitExists("target") then return false, "you have a target" end
     if EditModeManagerFrame and EditModeManagerFrame:IsShown() then return false, "Edit Mode is open" end
     local h, hm = UnitHealth("player"), UnitHealthMax("player")
-    if not (issecret(h) or issecret(hm)) and h < hm then return false, "health isn't full" end
+    if issecret(h) or issecret(hm) then
+        if not Settled("health") then return false, "health is still changing" end
+    elseif h < hm then
+        return false, "health isn't full"
+    end
     local pType, token = UnitPowerType("player")
     local p, pm = UnitPower("player", pType), UnitPowerMax("player", pType)
-    if not (issecret(p) or issecret(pm)) then
+    if issecret(p) or issecret(pm) then
+        if not Settled("power") then return false, (token or "power") .. " is still changing" end
+    else
         if EMPTY_AT_REST[token] and p > 0 then return false, (token or "power") .. " isn't empty" end
         if not EMPTY_AT_REST[token] and p < pm then return false, (token or "power") .. " isn't full" end
     end
@@ -60,6 +71,25 @@ function Power:UpdateFade(force)
     if force and ns.Skin.prd then current = ns.Skin.prd:GetAlpha() end
     target = want
     fader:Show()
+end
+
+-- A change to health or power (or leaving combat, after which both start ticking back): note
+-- it, and look again once things have been quiet long enough to settle.
+local recheck
+local function Changed(kind)
+    lastChange[kind] = GetTime()
+    if recheck then return end
+    local function Check()
+        local wait = math.max(lastChange.health, lastChange.power) + SETTLE - GetTime()
+        if wait > 0 then
+            C_Timer.After(wait + 0.05, Check)
+        else
+            recheck = nil
+            Power:UpdateFade()
+        end
+    end
+    recheck = true
+    C_Timer.After(SETTLE + 0.05, Check)
 end
 
 function Power:Debug()
@@ -137,6 +167,81 @@ function Power:UpdateMarks()
 end
 
 ------------------------------------------------------------------------------
+-- Mana regen (the five-second rule): spending mana stops your regen for 5 seconds. A thin
+-- strip under whichever bar shows your mana fills across those 5 seconds, a spark at its tip,
+-- and goes when regen starts again. It starts from the cost of the spell cast (spell data, not
+-- your mana, which the game may keep secret).
+------------------------------------------------------------------------------
+
+local MANA = (Enum.PowerType and Enum.PowerType.Mana) or 0
+local RULE = 5
+local regenAt -- when regen starts again
+
+local function CostsMana(spellID)
+    if issecret(spellID) or not C_Spell.GetSpellPowerCost then return false end
+    for _, c in ipairs(C_Spell.GetSpellPowerCost(spellID) or {}) do
+        if c.type == MANA and not issecret(c.cost) and ((c.cost or 0) > 0 or (c.costPercent or 0) > 0) then
+            return true
+        end
+    end
+    return false
+end
+
+-- The bar that shows your mana: the main one in caster form, the form's mana bar in a form.
+local function ManaBar()
+    local _, _, power, alt = ns.Skin:Find()
+    if UnitPowerType("player") == MANA then return power end
+    if alt and alt:IsShown() then return alt end
+end
+
+local regen = CreateFrame("Frame")
+regen:Hide()
+regen.strip = regen:CreateTexture(nil, "OVERLAY")
+regen.spark = regen:CreateTexture(nil, "OVERLAY", nil, 1)
+regen.spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
+regen.spark:SetBlendMode("ADD")
+
+regen:SetScript("OnUpdate", function(self)
+    local left = regenAt and (regenAt - GetTime()) or 0
+    local bar = ManaBar()
+    if left <= 0 or not bar or not ns.db.regen.enabled then
+        self:Hide()
+        return
+    end
+    if self.bar ~= bar then
+        -- Under that bar, two pixels tall, just below its edge.
+        self.bar = bar
+        -- On the display, not the bar: the main power bar clips anything outside its edges.
+        self:SetParent(ns.Skin.prd or bar:GetParent())
+        self:SetFrameStrata(bar:GetFrameStrata())
+        local px = 768 / select(2, GetPhysicalScreenSize()) / self:GetEffectiveScale()
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -px)
+        self:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -px)
+        self:SetHeight(px * 2)
+        self:SetFrameLevel(bar:GetFrameLevel() + 5)
+        self.spark:SetSize(px * 8, px * 10)
+    end
+    local width = (1 - left / RULE) * self:GetWidth()
+    self.strip:ClearAllPoints()
+    self.strip:SetPoint("TOPLEFT")
+    self.strip:SetPoint("BOTTOMLEFT")
+    self.strip:SetWidth(math.max(0.01, width))
+    self.spark:ClearAllPoints()
+    self.spark:SetPoint("CENTER", self, "LEFT", width, 0)
+end)
+
+function Power:StartRegenTimer()
+    if not ns.db.regen.enabled then return end
+    regenAt = GetTime() + RULE
+    local c = ns.db.regen.color
+    regen.strip:SetColorTexture(c.r, c.g, c.b, 0.9)
+    regen.spark:SetVertexColor(c.r, c.g, c.b)
+    regen.bar = nil -- placed afresh: the mana bar may have changed
+    regen:Show()
+end
+
+------------------------------------------------------------------------------
 
 function Power:Init()
     local ev = CreateFrame("Frame")
@@ -145,10 +250,22 @@ function Power:Init()
         ev:RegisterEvent(event)
     end
     for _, event in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER",
-        "UNIT_DISPLAYPOWER" }) do
+        "UNIT_DISPLAYPOWER", "UNIT_SPELLCAST_SUCCEEDED" }) do
         ev:RegisterUnitEvent(event, "player")
     end
-    ev:SetScript("OnEvent", function(_, event)
+    ev:SetScript("OnEvent", function(_, event, _, _, spellID)
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if CostsMana(spellID) then Power:StartRegenTimer() end
+            return
+        end
+        if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
+            Changed("health")
+        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
+            Changed("power")
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            Changed("health")
+            Changed("power")
+        end
         if event == "SPELLS_CHANGED" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER"
             or event == "PLAYER_ENTERING_WORLD" then
             Power:UpdateMarks()
