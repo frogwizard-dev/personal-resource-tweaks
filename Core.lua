@@ -15,7 +15,7 @@ ns.defaults = {
         -- druid's mana bar in forms (0 = as tall as the power bar).
         size = { width = 0, health = 0, power = 0, alt = 0 },
         borderColor = { r = 0, g = 0, b = 0, a = 1 },
-        -- Text templates per slot; see Compile in Skin.lua. Empty = hidden.
+        -- Text templates per slot (words value, max, percent; FrogLib.Text). Empty = hidden.
         healthText = { left = "", center = "value (percent)", right = "" },
         powerText = { left = "", center = "value", right = "" },
         -- Its own text for these power types (mana and anything else use powerText). Rage and
@@ -74,7 +74,7 @@ ns.defaults = {
 
 -- Midnight hides some combat values from addons ("secret values"). They can be handed to
 -- Blizzard widgets for display, but not compared or used in arithmetic.
-ns.issecret = issecretvalue or function() return false end
+ns.issecret = FrogLib.issecret
 
 function ns.Print(...)
     print("|cff66ccffPersonalResourceTweaks|r:", ...)

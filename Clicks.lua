@@ -4,9 +4,9 @@ local _, ns = ...
 -- menu (as on the player frame).
 -- A secure button sits over the display. It copies the display's place and size rather than
 -- anchoring to it: anything a secure frame is anchored to becomes protected, and the display is
--- re-laid by Blizzard's own code in combat. A unit button's own "togglemenu" is gated on 12.x, so
--- right-click runs "/click" on a hidden SecureActionButton child whose togglemenu isn't (as
--- XIVPlayer does). Secure frames can only be placed and shown out of combat; the place is checked
+-- re-laid by Blizzard's own code in combat. FrogLib.Secure makes it: a unit button's own
+-- "togglemenu" is gated on 12.x, so right-click runs "/click" on a hidden SecureActionButton child
+-- whose togglemenu isn't (as XIVPlayer does). Secure frames can only be placed and shown out of combat; the place is checked
 -- once a second then, and changes made in combat wait. When the display only shows in combat (its
 -- Edit Mode setting), the button does too, through a state driver.
 
@@ -16,22 +16,7 @@ ns.Clicks = Clicks
 local function Display() return _G.PersonalResourceDisplayFrame end
 
 local function MakeButton()
-    local b = CreateFrame("Button", "PersonalResourceTweaksClick", UIParent, "SecureUnitButtonTemplate")
-    b:SetAttribute("unit", "player")
-    b:SetAttribute("*type1", "target")
-    b:RegisterForClicks("AnyUp")
-
-    local menu = CreateFrame("Button", "PersonalResourceTweaksClickMenu", b, "SecureActionButtonTemplate")
-    menu:SetSize(1, 1)
-    menu:EnableMouse(false)
-    menu:RegisterForClicks("AnyUp")
-    for i = 1, 5 do menu:SetAttribute("type" .. i, "togglemenu") end
-    menu:SetAttribute("useparent-unit", true)
-    menu:SetAttribute("useOnKeyDown", false) -- act on the up-click whatever the key-down setting
-    b:SetAttribute("*type2", "macro")
-    b:SetAttribute("*macrotext2", "/click PersonalResourceTweaksClickMenu")
-    b:Hide()
-    return b
+    return (FrogLib.Secure.UnitButton("PersonalResourceTweaksClick", "player"))
 end
 
 -- When the button should be up: the display's own visibility setting.

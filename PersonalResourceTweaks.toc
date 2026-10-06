@@ -2,7 +2,7 @@
 ## Title: PersonalResourceTweaks
 ## Category: Frog Wizard
 ## Notes: Skins Blizzard's Personal Resource Display and shows whitelisted buffs/debuffs above it.
-## Version: 0.8.0
+## Version: 0.8.1
 ## OptionalDeps: EllesmereUI
 ## SavedVariables: PersonalResourceTweaksDB
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield

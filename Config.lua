@@ -230,10 +230,10 @@ function Config:BuildBars(p)
     barBg:SetAllPoints()
     barBg:SetColorTexture(0, 0, 0, 0.6)
     local _, class = UnitClass("player")
-    local cc = RAID_CLASS_COLORS[class]
     local function updateBar()
         bar:SetStatusBarTexture(db.texture)
-        bar:SetStatusBarColor(cc.r, cc.g, cc.b)
+        local r, g, b = FrogLib.Color.Class(class)
+        bar:SetStatusBarColor(r or 1, g or 1, b or 1)
     end
     place(Dropdown(p, "Bar texture", function() return ns.Media:List("statusbar") end,
         function() return db.texture end,

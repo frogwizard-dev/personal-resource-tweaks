@@ -16,7 +16,7 @@ ns.Combo = Combo
 ------------------------------------------------------------------------------
 
 local issecret = ns.issecret
-local Borders, NoSnap = FrogLib.Borders, FrogLib.NoSnap
+local Borders, NoSnap, Snap = FrogLib.Borders, FrogLib.NoSnap, FrogLib.PixelSnap
 local POINTS = (Enum.PowerType and Enum.PowerType.ComboPoints) or 4
 local MAX_PIPS = 10
 
@@ -24,14 +24,14 @@ local holder -- the row's frame, on the display; made on first use
 local pips = {}
 local count = 0 -- pips in use (the max)
 
-local function Pixel(frame)
-    return 768 / select(2, GetPhysicalScreenSize()) / frame:GetEffectiveScale()
-end
+local Pixel = FrogLib.Pixel
 
+-- Your class colour (FrogLib.Color's: a class colour add-on's first); white if it can't tell.
 local function ClassColor()
     local _, class = UnitClass("player")
-    local c = (C_ClassColor and C_ClassColor.GetClassColor(class)) or RAID_CLASS_COLORS[class]
-    return c.r, c.g, c.b
+    local r, g, b = FrogLib.Color.Class(class)
+    if r then return r, g, b end
+    return 1, 1, 1
 end
 
 -- Whether this character has combo points at all (the row's space above the bars is kept for
@@ -73,11 +73,6 @@ local function Outset(px)
     if s.borderStyle == "forever" then return 2 * s.frameThickness end
     if s.borderStyle == "classic" then return math.ceil(3 / px) end
     return math.max(0, s.borderSize)
-end
-
-local function Snap(region)
-    if region.SetRoundLayoutToNearestPixel then region:SetRoundLayoutToNearestPixel(true) end
-    NoSnap(region)
 end
 
 local function MakePip(i)

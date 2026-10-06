@@ -5,101 +5,53 @@ ns.Power = Power
 local issecret = ns.issecret
 
 ------------------------------------------------------------------------------
--- Fade when idle: out of combat, at full health, with your power at rest (rage empty, mana or
--- energy full) and, optionally, no target, the display fades out; anything else brings it back.
--- Health and power the game keeps secret can't be compared with their maximum, so for those it
--- watches them instead: out of combat they tick (regen, rage decay) until they're full or empty
--- and then stop, so a few quiet seconds mean they've settled.
+-- Fade when idle (FrogLib.Idle): out of combat, at full health, with your power at rest (rage
+-- empty, mana or energy full) and, optionally, no target, the display fades out; anything else
+-- brings it back. Power the game keeps secret is watched instead: out of combat it ticks until
+-- it's full or empty and then stops, so a few quiet seconds mean it's settled. Health the game
+-- keeps secret goes through FrogLib's full-health gate: the game itself reads it, and the display
+-- only fades at full health (waiting for it to settle faded it at low health too).
 ------------------------------------------------------------------------------
 
--- Power that sits at empty when you're resting (it builds up in combat), rather than full.
-local EMPTY_AT_REST = { RAGE = true, RUNIC_POWER = true, LUNAR_POWER = true, MAELSTROM = true,
-    INSANITY = true, FURY = true, PAIN = true }
-local SPEED_IN, SPEED_OUT = 6, 2 -- opacity per second: back in a sixth of a second, out in half
-local SETTLE = 4 -- quiet seconds after which a secret health or power counts as settled
-local lastChange = { health = 0, power = 0 }
+local idle -- the watcher (Init)
+-- The display's opacity: back in a sixth of a second, out in half.
+local fader = FrogLib.Idle.NewFader(nil, { speedIn = 6, speedOut = 2 })
 
-local function Settled(kind) return GetTime() - lastChange[kind] >= SETTLE end
-
--- Idle or not, and why not (for /prt fade).
-local function Idle()
-    local cfg = ns.db.fade
-    if InCombatLockdown() or UnitAffectingCombat("player") then return false, "in combat" end
-    if cfg.target and UnitExists("target") then return false, "you have a target" end
-    if EditModeManagerFrame and EditModeManagerFrame:IsShown() then return false, "Edit Mode is open" end
-    local h, hm = UnitHealth("player"), UnitHealthMax("player")
-    if issecret(h) or issecret(hm) then
-        if not Settled("health") then return false, "health is still changing" end
-    elseif h < hm then
-        return false, "health isn't full"
-    end
-    local pType, token = UnitPowerType("player")
-    local p, pm = UnitPower("player", pType), UnitPowerMax("player", pType)
-    if issecret(p) or issecret(pm) then
-        if not Settled("power") then return false, (token or "power") .. " is still changing" end
-    else
-        if EMPTY_AT_REST[token] and p > 0 then return false, (token or "power") .. " isn't empty" end
-        if not EMPTY_AT_REST[token] and p < pm then return false, (token or "power") .. " isn't full" end
-    end
-    return true
+local function Evaluate()
+    return idle:Evaluate({ noTarget = ns.db.fade.target, editMode = true })
 end
-
-local target, current = 1, 1
-local fader = CreateFrame("Frame")
-fader:Hide()
-fader:SetScript("OnUpdate", function(self, elapsed)
-    local prd = ns.Skin.prd
-    if not prd then
-        self:Hide()
-        return
-    end
-    if current < target then
-        current = math.min(target, current + elapsed * SPEED_IN)
-    else
-        current = math.max(target, current - elapsed * SPEED_OUT)
-    end
-    prd:SetAlpha(current)
-    if current == target then self:Hide() end
-end)
 
 -- force: put our opacity back even if it hasn't changed (Blizzard resets it when it re-shows
 -- the display).
 function Power:UpdateFade(force)
+    local prd = ns.Skin.prd
+    fader.frame = prd
+    if not (prd and idle) then return end
     local cfg = ns.db.fade
-    local want = (cfg.enabled and Idle()) and cfg.alpha or 1
-    if want == target and not force then return end
-    if force and ns.Skin.prd then current = ns.Skin.prd:GetAlpha() end
-    target = want
-    fader:Show()
-end
-
--- A change to health or power (or leaving combat, after which both start ticking back): note
--- it, and look again once things have been quiet long enough to settle.
-local recheck
-local function Changed(kind)
-    lastChange[kind] = GetTime()
-    if recheck then return end
-    local function Check()
-        local wait = math.max(lastChange.health, lastChange.power) + SETTLE - GetTime()
-        if wait > 0 then
-            C_Timer.After(wait + 0.05, Check)
-        else
-            recheck = nil
-            Power:UpdateFade()
-        end
+    local on, secret = false, false
+    if cfg.enabled then
+        local _
+        on, _, secret = Evaluate()
     end
-    recheck = true
-    C_Timer.After(SETTLE + 0.05, Check)
+    fader:SetGate((on and secret) and "player" or nil)
+    fader:Set(on and cfg.alpha or 1, force and "again" or nil)
 end
 
 function Power:Debug()
-    local idle, why = Idle()
+    if not idle then return end
+    local on, why, secret = Evaluate()
     local h, p = UnitHealth("player"), UnitPower("player", (UnitPowerType("player")))
     local prd = ns.Skin.prd
-    ns.Print(string.format("fade %s; idle: %s%s; health %s, power %s (%s); opacity wanted %.2f, now %s.",
-        ns.db.fade.enabled and "on" or "off", idle and "yes" or "no", why and (" (" .. why .. ")") or "",
+    local now = "no display"
+    if prd then
+        local a = prd:GetAlpha()
+        now = issecret(a) and "set by the game (health hidden)" or string.format("%.2f", a)
+    end
+    local token = select(2, UnitPowerType("player"))
+    ns.Print(string.format("fade %s; idle: %s%s; health %s, power %s (%s); opacity wanted %.2f%s, now %s.",
+        ns.db.fade.enabled and "on" or "off", on and "yes" or "no", why and (" (" .. why .. ")") or "",
         issecret(h) and "secret" or tostring(h), issecret(p) and "secret" or tostring(p),
-        select(2, UnitPowerType("player")) or "?", target, prd and string.format("%.2f", prd:GetAlpha()) or "no display"))
+        (not issecret(token) and token) or "?", fader.target, secret and " at full health" or "", now))
 end
 
 ------------------------------------------------------------------------------
@@ -117,19 +69,13 @@ local function Cost(id, pType)
     if not info then return end
     for _, c in ipairs(C_Spell.GetSpellPowerCost(info.spellID) or {}) do
         if c.type == pType and not issecret(c.cost) then
-            local cost = c.minCost and not issecret(c.minCost) and c.minCost > 0 and c.minCost or c.cost
+            local cost = not issecret(c.minCost) and c.minCost and c.minCost > 0 and c.minCost or c.cost
             return cost
         end
     end
 end
 
-local function Snap(region)
-    if region.SetRoundLayoutToNearestPixel then region:SetRoundLayoutToNearestPixel(true) end
-    if region.SetSnapToPixelGrid then
-        region:SetSnapToPixelGrid(false)
-        region:SetTexelSnappingBias(0)
-    end
-end
+local Snap = FrogLib.PixelSnap
 
 function Power:UpdateMarks()
     for _, mark in ipairs(marks) do mark:Hide() end
@@ -141,7 +87,7 @@ function Power:UpdateMarks()
     local width = bar:GetWidth()
     if issecret(max) or not max or max <= 0 or not width or width <= 0 then return end
     -- One screen pixel, in the bar's units; marks sit on whole pixels so they stay sharp.
-    local px = 768 / select(2, GetPhysicalScreenSize()) / bar:GetEffectiveScale()
+    local px = FrogLib.Pixel(bar)
     local c = cfg.color
     local n = 0
     for _, id in ipairs(cfg.spells) do
@@ -169,28 +115,20 @@ end
 ------------------------------------------------------------------------------
 -- Mana regen (the five-second rule): spending mana stops your regen for 5 seconds. A thin
 -- strip under whichever bar shows your mana fills across those 5 seconds, a spark at its tip,
--- and goes when regen starts again. It starts from the cost of the spell cast (spell data, not
--- your mana, which the game may keep secret).
+-- and goes when regen starts again. FrogLib.FSR says when it starts: from the cost of the spell
+-- cast (spell data, not your mana, which the game may keep secret), or, for a spell the game
+-- keeps secret, from the drop in your mana that comes with it.
 ------------------------------------------------------------------------------
 
 local MANA = (Enum.PowerType and Enum.PowerType.Mana) or 0
-local RULE = 5
+local RULE = FrogLib.FSR.RULE
 local regenAt -- when regen starts again
-
-local function CostsMana(spellID)
-    if issecret(spellID) or not C_Spell.GetSpellPowerCost then return false end
-    for _, c in ipairs(C_Spell.GetSpellPowerCost(spellID) or {}) do
-        if c.type == MANA and not issecret(c.cost) and ((c.cost or 0) > 0 or (c.costPercent or 0) > 0) then
-            return true
-        end
-    end
-    return false
-end
+local fsr = FrogLib.FSR.NewWatcher(function() Power:StartRegenTimer() end)
 
 -- The bar that shows your mana: the main one in caster form, the form's mana bar in a form.
 local function ManaBar()
     local _, _, power, alt = ns.Skin:Find()
-    if UnitPowerType("player") == MANA then return power end
+    if FrogLib.Safe(UnitPowerType("player")) == MANA then return power end
     if alt and alt:IsShown() then return alt end
 end
 
@@ -214,7 +152,7 @@ regen:SetScript("OnUpdate", function(self)
         -- On the display, not the bar: the main power bar clips anything outside its edges.
         self:SetParent(ns.Skin.prd or bar:GetParent())
         self:SetFrameStrata(bar:GetFrameStrata())
-        local px = 768 / select(2, GetPhysicalScreenSize()) / self:GetEffectiveScale()
+        local px = FrogLib.Pixel(self)
         self:ClearAllPoints()
         self:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -px)
         self:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -px)
@@ -244,38 +182,23 @@ end
 ------------------------------------------------------------------------------
 
 function Power:Init()
+    -- The fade: the watcher listens to your health, power, combat, target and Edit Mode itself.
+    idle = FrogLib.Idle.NewWatcher({ unit = "player", events = true, onUpdate = function(kind)
+        Power:UpdateFade()
+        -- A health change while the fade waits on the gate: played again, so it fades smoothly
+        -- once the game sees you at full health.
+        if kind == "health" then fader:Replay() end
+    end })
+    fsr:Listen()
+    -- The cost marks.
     local ev = CreateFrame("Frame")
-    for _, event in ipairs({ "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_TARGET_CHANGED",
-        "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED" }) do
+    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED" }) do
         ev:RegisterEvent(event)
     end
-    for _, event in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER",
-        "UNIT_DISPLAYPOWER", "UNIT_SPELLCAST_SUCCEEDED" }) do
+    for _, event in ipairs({ "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do
         ev:RegisterUnitEvent(event, "player")
     end
-    ev:SetScript("OnEvent", function(_, event, _, _, spellID)
-        if event == "UNIT_SPELLCAST_SUCCEEDED" then
-            if CostsMana(spellID) then Power:StartRegenTimer() end
-            return
-        end
-        if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-            Changed("health")
-        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
-            Changed("power")
-        elseif event == "PLAYER_REGEN_ENABLED" then
-            Changed("health")
-            Changed("power")
-        end
-        if event == "SPELLS_CHANGED" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER"
-            or event == "PLAYER_ENTERING_WORLD" then
-            Power:UpdateMarks()
-        end
-        Power:UpdateFade()
-    end)
-    if EventRegistry then
-        EventRegistry:RegisterCallback("EditMode.Enter", function() Power:UpdateFade() end, self)
-        EventRegistry:RegisterCallback("EditMode.Exit", function() Power:UpdateFade() end, self)
-    end
+    ev:SetScript("OnEvent", function() Power:UpdateMarks() end)
     self:Apply()
 end
 

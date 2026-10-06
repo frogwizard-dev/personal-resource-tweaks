@@ -17,10 +17,12 @@ function Skin:Find()
     return prd, health, power, alt
 end
 
+-- Your class colour (FrogLib.Color's: a class colour add-on's first); white if it can't tell.
 local function ClassColor()
     local _, class = UnitClass("player")
-    local c = (C_ClassColor and C_ClassColor.GetClassColor(class)) or RAID_CLASS_COLORS[class]
-    return c.r, c.g, c.b
+    local r, g, b = FrogLib.Color.Class(class)
+    if r then return r, g, b end
+    return 1, 1, 1
 end
 
 -- Rather than guess texture names, hide by role. The health container is pure art. On the
@@ -81,13 +83,7 @@ end
 -- engine keeps its layout on the pixel grid, as Blizzard's own nameplate borders do.
 local Borders = FrogLib.Borders
 
-local function Snap(region)
-    if region.SetRoundLayoutToNearestPixel then region:SetRoundLayoutToNearestPixel(true) end
-    if region.SetSnapToPixelGrid then
-        region:SetSnapToPixelGrid(false)
-        region:SetTexelSnappingBias(0)
-    end
-end
+local Snap = FrogLib.PixelSnap
 
 local function PlaceBorder(bar)
     local b = bar.prtBorder
@@ -146,65 +142,19 @@ local function HideBlizzardArt(prd, health, power, alt)
     HideTextures(alt)
 end
 
--- UnitHealthPercent/UnitPowerPercent return a value that may be secret, so it only ever
--- goes straight into SetFormattedText, which formats it engine-side.
-local function HealthPercent()
-    if UnitHealthPercent and CurveConstants then
-        return UnitHealthPercent("player", true, CurveConstants.ScaleTo100)
-    end
-    local h, m = UnitHealth("player"), UnitHealthMax("player")
-    if issecret(h) or issecret(m) or m == 0 then return 0 end
-    return h / m * 100
-end
-
-local function PowerPercent(pType)
-    if UnitPowerPercent and CurveConstants then
-        return UnitPowerPercent("player", pType, true, CurveConstants.ScaleTo100)
-    end
-    local p, m = UnitPower("player", pType), UnitPowerMax("player", pType)
-    if issecret(p) or issecret(m) or m == 0 then return 0 end
-    return p / m * 100
-end
-
--- Turns a template like "value | percent.1" into a format string ("%d || %.1f%%") plus the
--- order of its arguments. Words: value, max, percent (percent.1 / percent.2 for decimals).
--- "|" is doubled because a single one starts a WoW text escape.
-local compiled = {}
-local function Compile(template)
-    local c = compiled[template]
-    if c then return c end
-    local args = {}
-    local pattern = template:gsub("%%", "%%%%")
-    pattern = pattern:gsub("||", "|") -- edit boxes store a typed "|" already doubled
-    pattern = pattern:gsub("|", "||")
-    pattern = pattern:gsub("(%a+)(%.?%d*)", function(word, suffix)
-        local w = word:lower()
-        if w == "value" or w == "max" then
-            args[#args + 1] = w
-            return "%d" .. suffix
-        elseif w == "percent" then
-            args[#args + 1] = "percent"
-            local places = tonumber(suffix:match("^%.(%d)"))
-            if places then return "%." .. math.min(places, 3) .. "f%%" end
-            return "%d%%" .. suffix
-        end
-    end)
-    c = { pattern = pattern, args = args }
-    compiled[template] = c
-    return c
-end
-
+-- The bar texts: templates (words value, max, percent; percent.1 for a decimal), FrogLib.Text's.
+-- The values and percentages (FrogLib.Unit's) may be secret: they only ever go into
+-- SetFormattedText, which formats them engine-side.
+local vals = {}
 local function SetBarText(fs, template, value, max, pct)
     if not fs then return end
-    if not ns.db.skin.enabled or strtrim(template) == "" then
+    if not ns.db.skin.enabled then
         fs:Hide()
         return
     end
-    fs:Show()
-    local c = Compile(template)
-    local vals = { value = value, max = max, percent = pct }
-    local a = c.args
-    pcall(fs.SetFormattedText, fs, c.pattern, vals[a[1]], vals[a[2]], vals[a[3]], vals[a[4]], vals[a[5]], vals[a[6]])
+    vals.value, vals.max, vals.percent = value, max, pct
+    FrogLib.Text.Set(fs, template, vals)
+    vals.value, vals.max, vals.percent = nil, nil, nil
 end
 
 local SLOTS = { "left", "center", "right" }
@@ -219,14 +169,14 @@ end
 
 local function UpdateHealthText()
     SetBarTexts(Skin.healthTexts, ns.db.skin.healthText,
-        UnitHealth("player"), UnitHealthMax("player"), HealthPercent())
+        UnitHealth("player"), UnitHealthMax("player"), FrogLib.Unit.HealthPercent("player"))
 end
 
 local function UpdatePowerText()
     local pType, token = UnitPowerType("player")
     local db = ns.db.skin
     SetBarTexts(Skin.powerTexts, db.powerTextFor[token] or db.powerText,
-        UnitPower("player", pType), UnitPowerMax("player", pType), PowerPercent(pType))
+        UnitPower("player", pType), UnitPowerMax("player", pType), FrogLib.Unit.PowerPercent("player", pType))
 end
 
 -- The third bar: Blizzard's mana bar for druids in a form (and Shadow priests), which shows
@@ -236,7 +186,7 @@ local MANA = (Enum.PowerType and Enum.PowerType.Mana) or 0
 local function UpdateAltText()
     if not Skin.altTexts then return end
     SetBarTexts(Skin.altTexts, ns.db.skin.altText,
-        UnitPower("player", MANA), UnitPowerMax("player", MANA), PowerPercent(MANA))
+        UnitPower("player", MANA), UnitPowerMax("player", MANA), FrogLib.Unit.PowerPercent("player", MANA))
 end
 
 -- Whether it should show: "always" (as Blizzard has it), "form" (only while your main bar isn't
@@ -301,9 +251,7 @@ end
 -- so they stay crisp whatever Edit Mode's "Size" scale is.
 local sizing, sized = false, {}
 
-local function PixelUnit(frame)
-    return (768 / select(2, GetPhysicalScreenSize())) / frame:GetEffectiveScale()
-end
+local PixelUnit = FrogLib.Pixel
 
 -- A bar's current size in screen pixels (for the settings to start from).
 function Skin:MeasureSize(key)
@@ -445,8 +393,9 @@ function Skin:Debug()
         if depth > 4 then return end
         for _, r in ipairs({ frame:GetRegions() }) do
             if r:IsObjectType("Texture") then
-                print(string.format("%s- texture %s [%s] alpha %.1f", string.rep("  ", depth),
-                    r:GetDebugName(), r:GetDrawLayer(), r:GetAlpha()))
+                local a = r:GetAlpha() -- secret if the game hides it (the display's gated fade)
+                print(string.format("%s- texture %s [%s] alpha %s", string.rep("  ", depth),
+                    r:GetDebugName(), r:GetDrawLayer(), issecret(a) and "hidden" or string.format("%.1f", a)))
             end
         end
         for _, c in ipairs({ frame:GetChildren() }) do

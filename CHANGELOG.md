@@ -1,5 +1,16 @@
 # PersonalResourceTweaks
 
+## 0.8.1
+
+### Fixes
+- Fading when idle no longer fades your display at low health when the game hides your health: it now fades only once you're back at full health, and comes back the moment you're hit or start a fight.
+- The mana regen strip now also starts after spells the game hides from add-ons, from the drop in your mana that comes with them.
+- The cost marks on your power bar no longer cause an error when the game hides a spell's minimum cost.
+- Bar text with more than six words now keeps updating.
+
+### Under the hood
+- Bar text templates, percentages, your class colour, pixel snapping and the click button are FrogLib's, shared with the other Frog Wizard add-ons (a class colour add-on's colour is used if you have one).
+
 ## 0.8.0
 
 ### Bar sizes
