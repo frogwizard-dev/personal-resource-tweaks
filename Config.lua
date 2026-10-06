@@ -2,213 +2,16 @@ local _, ns = ...
 local Config = {}
 ns.Config = Config
 
-local issecret = ns.issecret
 local W, H = 550, 760
-local ROW_H = 26
 
-local function Label(parent, text, template)
-    local fs = parent:CreateFontString(nil, "OVERLAY", template or "GameFontNormal")
-    fs:SetText(text)
-    return fs
-end
-
-local function Button(parent, text, w, h)
-    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, h or 22)
-    b:SetText(text)
-    return b
-end
-
-local function Checkbox(parent, text, get, set)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    cb:SetSize(24, 24)
-    Label(cb, text, "GameFontHighlight"):SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    cb:SetChecked(get())
-    cb:SetScript("OnShow", function(self) self:SetChecked(get()) end)
-    cb:SetScript("OnClick", function(self)
-        set(self:GetChecked())
-        ns.Refresh()
-    end)
-    return cb
-end
-
-local function Stepper(parent, text, min, max, step, get, set)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(300, 24)
-    Label(f, text, "GameFontHighlight"):SetPoint("LEFT", 4, 0)
-    local minus = Button(f, "-", 24)
-    minus:SetPoint("LEFT", 150, 0)
-    local val = Label(f, "", "GameFontHighlight")
-    val:SetWidth(40)
-    val:SetPoint("LEFT", minus, "RIGHT", 4, 0)
-    local plus = Button(f, "+", 24)
-    plus:SetPoint("LEFT", val, "RIGHT", 4, 0)
-
-    local function refresh() val:SetText(get()) end
-    local function change(d)
-        if IsShiftKeyDown() then d = d * 10 end
-        set(math.max(min, math.min(max, get() + d)))
-        refresh()
-        ns.Refresh()
-    end
-    minus:SetScript("OnClick", function() change(-step) end)
-    plus:SetScript("OnClick", function() change(step) end)
-    f:SetScript("OnShow", refresh)
-    refresh()
-    return f
-end
-
-local function SpellInfo(id)
-    return C_Spell.GetSpellName(id), C_Spell.GetSpellTexture(id)
-end
-
--- Plain mouse-wheel scroll list of icon + text rows; callers add their own buttons per row.
-local function ScrollList(parent, w, h)
-    local sf = CreateFrame("ScrollFrame", nil, parent)
-    sf:SetSize(w, h)
-    local bg = sf:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0.3)
-    local child = CreateFrame("Frame", nil, sf)
-    child:SetSize(w, 1)
-    sf:SetScrollChild(child)
-    sf:EnableMouseWheel(true)
-    sf:SetScript("OnMouseWheel", function(self, delta)
-        local max = math.max(0, child:GetHeight() - self:GetHeight())
-        self:SetVerticalScroll(math.max(0, math.min(max, self:GetVerticalScroll() - delta * ROW_H)))
-    end)
-    sf.child, sf.rows, sf.w = child, {}, w
-    return sf
-end
-
-local function Fill(sf, items, setup)
-    for i, item in ipairs(items) do
-        local r = sf.rows[i]
-        if not r then
-            r = CreateFrame("Frame", nil, sf.child)
-            r:SetSize(sf.w - 8, ROW_H)
-            r:SetPoint("TOPLEFT", 4, -(i - 1) * ROW_H - 2)
-            r.icon = r:CreateTexture(nil, "ARTWORK")
-            r.icon:SetSize(22, 22)
-            r.icon:SetPoint("LEFT")
-            r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            r.text = Label(r, "", "GameFontHighlight")
-            r.text:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
-            r.text:SetWidth(sf.w - 150)
-            r.text:SetJustifyH("LEFT")
-            r.text:SetWordWrap(false)
-            sf.rows[i] = r
-        end
-        setup(r, item, i)
-        r:Show()
-    end
-    for i = #items + 1, #sf.rows do
-        sf.rows[i]:Hide()
-    end
-    sf.child:SetHeight(math.max(1, #items * ROW_H + 4))
-    local max = math.max(0, sf.child:GetHeight() - sf:GetHeight())
-    if sf:GetVerticalScroll() > max then sf:SetVerticalScroll(max) end
-end
-
--- Blizzard's modern dropdown. groups() returns { { title = "...", items = { { name = , path = } } } }.
-local function Dropdown(parent, text, groups, get, set)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(380, 26)
-    Label(f, text, "GameFontHighlight"):SetPoint("LEFT", 4, 0)
-    local dd = CreateFrame("DropdownButton", nil, f, "WowStyle1DropdownTemplate")
-    dd:SetWidth(210)
-    dd:SetPoint("LEFT", 150, 0)
-    dd:SetupMenu(function(_, root)
-        local all, count = groups(), 0
-        for _, group in ipairs(all) do count = count + #group.items end
-        if count > 20 then root:SetScrollMode(20 * 20) end
-        for _, group in ipairs(all) do
-            if group.title then root:CreateTitle(group.title) end
-            for _, item in ipairs(group.items) do
-                root:CreateRadio(item.name, function() return get() == item.path end, function()
-                    set(item.path)
-                    ns.Refresh()
-                end)
-            end
-        end
-    end)
-    return f
-end
-
-local function Options(...)
-    local items = {}
-    for i = 1, select("#", ...), 2 do
-        local path, name = select(i, ...)
-        items[#items + 1] = { path = path, name = name }
-    end
-    local groups = { { items = items } }
-    return function() return groups end
-end
+-- The controls are FrogLib's (UI.lua); every change calls ns.Refresh().
+local UI = FrogLib.UI.Kit({ refresh = function() ns.Refresh() end })
+local Label, Button, Checkbox, Stepper, Dropdown, Options, ColorSwatch, TextBox, Placer =
+    UI.Label, UI.Button, UI.Checkbox, UI.Stepper, UI.Dropdown, UI.Options, UI.ColorSwatch, UI.TextBox, UI.Placer
+local SpellInfo, ScrollList, Fill = UI.SpellInfo, UI.ScrollList, UI.FillList
 
 local OUTLINES = Options("", "None", "OUTLINE", "Outline", "THICKOUTLINE", "Thick outline")
 local MODES = Options("whitelist", "Whitelist: only these", "blacklist", "Blacklist: all except these")
-
-local function ColorSwatch(parent, text, get, set)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(300, 24)
-    Label(f, text, "GameFontHighlight"):SetPoint("LEFT", 4, 0)
-    local sw = CreateFrame("Button", nil, f, "BackdropTemplate")
-    sw:SetSize(40, 18)
-    sw:SetPoint("LEFT", 150, 0)
-    sw:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    sw:SetBackdropBorderColor(1, 1, 1, 0.6)
-    local function refresh()
-        local c = get()
-        sw:SetBackdropColor(c.r, c.g, c.b, 1)
-    end
-    local function apply(r, g, b)
-        set(r, g, b)
-        refresh()
-        ns.Refresh()
-    end
-    sw:SetScript("OnClick", function()
-        local c = get()
-        local r0, g0, b0 = c.r, c.g, c.b
-        ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-        ColorPickerFrame:SetupColorPickerAndShow({
-            r = r0, g = g0, b = b0,
-            swatchFunc = function() apply(ColorPickerFrame:GetColorRGB()) end,
-            cancelFunc = function() apply(r0, g0, b0) end,
-        })
-    end)
-    refresh()
-    return f
-end
-
--- Free-text setting that applies as you type.
-local function TextBox(parent, text, get, set)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(380, 26)
-    Label(f, text, "GameFontHighlight"):SetPoint("LEFT", 4, 0)
-    local eb = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    eb:SetSize(200, 20)
-    eb:SetPoint("LEFT", 156, 0)
-    eb:SetAutoFocus(false)
-    eb:SetText(get())
-    eb:SetScript("OnShow", function(self) self:SetText(get()) end)
-    eb:SetScript("OnTextChanged", function(self, userInput)
-        if not userInput then return end
-        set(self:GetText())
-        ns.Refresh()
-    end)
-    eb:SetScript("OnEnterPressed", eb.ClearFocus)
-    eb:SetScript("OnEscapePressed", eb.ClearFocus)
-    f.eb = eb
-    return f
-end
-
-local function Placer()
-    local y = 0
-    return function(w, h, x)
-        w:SetPoint("TOPLEFT", x or 0, y)
-        y = y - h
-    end
-end
 
 function Config:BuildBars(p)
     local db = ns.db.skin
@@ -592,88 +395,18 @@ end
 
 -- Lists the auras currently on you, so you can whitelist without knowing IDs.
 function Config:ShowPicker(kind, onAdd)
-    if InCombatLockdown() then
-        ns.Print("Leave combat to browse your current auras.")
-        return
-    end
-    local pk = self.picker
-    if not pk then
-        pk = CreateFrame("Frame", nil, self.frame, "BasicFrameTemplateWithInset")
-        pk:SetSize(320, 420)
-        pk:SetPoint("TOPLEFT", self.frame, "TOPRIGHT", 4, 0)
-        pk.title = Label(pk, "")
-        pk.title:SetPoint("TOP", 0, -5)
-        pk.list = ScrollList(pk, 296, 370)
-        pk.list:SetPoint("TOPLEFT", 12, -32)
-        self.picker = pk
-    end
-    pk.title:SetText("Your current " .. kind)
-
-    local filter = kind == "buffs" and "HELPFUL" or "HARMFUL"
-    local items = {}
-    for i = 1, 40 do
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, filter)
-        if not ok or not aura then break end
-        if not issecret(aura.spellId) then
-            items[#items + 1] = aura
-        end
-    end
-    Fill(pk.list, items, function(r, aura)
-        r.icon:SetTexture(aura.icon)
-        r.text:SetText(aura.name .. " |cff888888(" .. aura.spellId .. ")|r")
-        if not r.add then
-            r.add = Button(r, "Add", 44, 20)
-            r.add:SetPoint("RIGHT", -2, 0)
-        end
-        r.add:SetScript("OnClick", function() onAdd(aura.spellId) end)
-    end)
-    if #items == 0 then ns.Print("You have no " .. kind .. " right now.") end
-    pk:Show()
+    self.picker = UI.AuraPicker(self.frame, kind, onAdd, ns.Print)
 end
 
 function Config:Build()
-    local f = CreateFrame("Frame", "PersonalResourceTweaksConfig", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(W, H)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:SetClampedToScreen(true)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    Label(f, "PersonalResourceTweaks"):SetPoint("TOP", 0, -5)
-    tinsert(UISpecialFrames, "PersonalResourceTweaksConfig")
-    self.frame = f
-
-    local pages, tabs = {}, {}
-    local function select(key)
-        for k, page in pairs(pages) do page:SetShown(k == key) end
-        for k, tab in pairs(tabs) do
-            if k == key then tab:LockHighlight() else tab:UnlockHighlight() end
-        end
-        if self.picker then self.picker:Hide() end
-    end
-    for i, def in ipairs({ { "bars", "Bars" }, { "text", "Text" }, { "buffs", "Buffs" }, { "debuffs", "Debuffs" },
-        { "power", "Fade & marks" }, { "combo", "Combo" } }) do
-        local key = def[1]
-        local tab = Button(f, def[2], 84)
-        tab:SetPoint("TOPLEFT", 14 + (i - 1) * 87, -30)
-        tab:SetScript("OnClick", function() select(key) end)
-        tabs[key] = tab
-        local page = CreateFrame("Frame", nil, f)
-        page:SetPoint("TOPLEFT", 16, -62)
-        page:SetPoint("BOTTOMRIGHT", -16, 12)
-        pages[key] = page
-    end
-
-    self:BuildBars(pages.bars)
-    self:BuildText(pages.text)
-    self:BuildAuraPage(pages.buffs, "buffs")
-    self:BuildAuraPage(pages.debuffs, "debuffs")
-    self:BuildPower(pages.power)
-    self:BuildCombo(pages.combo)
-    select("bars")
+    self.frame = UI.Window("PersonalResourceTweaksConfig", "PersonalResourceTweaks", W, H, {
+        { "bars", "Bars", function(p) self:BuildBars(p) end },
+        { "text", "Text", function(p) self:BuildText(p) end },
+        { "buffs", "Buffs", function(p) self:BuildAuraPage(p, "buffs") end },
+        { "debuffs", "Debuffs", function(p) self:BuildAuraPage(p, "debuffs") end },
+        { "power", "Fade & marks", function(p) self:BuildPower(p) end },
+        { "combo", "Combo", function(p) self:BuildCombo(p) end },
+    }, { tabWidth = 84, tabGap = 3, onSelect = function() if self.picker then self.picker:Hide() end end })
 end
 
 function Config:Toggle()

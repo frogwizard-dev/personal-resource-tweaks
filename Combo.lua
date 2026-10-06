@@ -17,8 +17,7 @@ ns.Combo = Combo
 
 local issecret = ns.issecret
 local Borders, NoSnap, Snap = FrogLib.Borders, FrogLib.NoSnap, FrogLib.PixelSnap
-local POINTS = (Enum.PowerType and Enum.PowerType.ComboPoints) or 4
-local MAX_PIPS = 10
+local C = FrogLib.Combo -- who has them, how many, the count (FrogLib's Combo.lua)
 
 local holder -- the row's frame, on the display; made on first use
 local pips = {}
@@ -36,43 +35,25 @@ end
 
 -- Whether this character has combo points at all (the row's space above the bars is kept for
 -- them even out of cat form, so the buffs don't jump with every shift).
-local function HasPoints()
-    local _, class = UnitClass("player")
-    return class == "ROGUE" or class == "DRUID"
-end
+local HasPoints = C.Has
 
 -- Whether the row shows now: rogues always, druids in cat form (the form with energy), and both
 -- in Edit Mode so it can be seen while you place the display.
 local function Wanted()
     local cfg = ns.db.combo
     if not (cfg.enabled and HasPoints()) then return false end
-    local _, class = UnitClass("player")
-    if class == "ROGUE" then return true end
     if EditModeManagerFrame and EditModeManagerFrame:IsShown() then return true end
-    local _, token = UnitPowerType("player")
-    return token == "ENERGY"
+    return C.Active()
 end
 
--- How many points you can have: 5, unless the game says otherwise (and can be asked).
-local function MaxPoints()
-    local max = UnitPowerMax("player", POINTS)
-    if issecret(max) or not max or max <= 0 then return 5 end
-    return math.min(max, MAX_PIPS)
-end
-
--- Your points on your target, as the target frame counts them. May be secret: widgets only.
-local function Points()
-    if GetComboPoints then return GetComboPoints("player", "target") end
-    return UnitPower("player", POINTS)
-end
+-- How many points you can have, and your points on your target (may be secret: widgets only).
+local MaxPoints, Points = C.Max, C.Points
 
 -- How far the border reaches outside each pip, in screen pixels, so gaps are measured between
 -- borders rather than under them.
 local function Outset(px)
     local s = ns.db.skin
-    if s.borderStyle == "forever" then return 2 * s.frameThickness end
-    if s.borderStyle == "classic" then return math.ceil(3 / px) end
-    return math.max(0, s.borderSize)
+    return Borders.Reach(s.borderStyle, { size = s.borderSize, thickness = s.frameThickness }, px)
 end
 
 local function MakePip(i)
@@ -117,13 +98,8 @@ local function Style(pip)
     pip.maxFill:SetMinMaxValues(count - 1, count)
     pip.maxFill:SetShown(cfg.maxEnabled)
     pip.bg:SetShown(s.background)
-    local b, style = pip.border, s.borderStyle
-    b.edges:SetColor(s.borderColor)
-    b.edges:Place(s.borderSize, 0)
-    b.forever:Place(s.frameThickness)
-    b.edges:SetShown(style == "pixel" and s.borderSize > 0)
-    b.forever:SetShown(style == "forever")
-    pip.stone:SetShown(style == "classic")
+    Borders.Show({ edges = pip.border.edges, stone = pip.stone, forever = pip.border.forever }, s.borderStyle,
+        { size = s.borderSize, color = s.borderColor, thickness = s.frameThickness })
 end
 
 -- The row's place and the pips' sizes, all in whole screen pixels. With no point width set, the
@@ -215,29 +191,15 @@ function Combo:SpaceAbove()
 end
 
 function Combo:Debug()
-    local p, m = Points(), UnitPowerMax("player", POINTS)
+    local p, m = Points(), UnitPowerMax("player", (Enum.PowerType and Enum.PowerType.ComboPoints) or 4)
     ns.Print(string.format("combo points: %s; showing %s; points %s of %s; %d pips.",
         ns.db.combo.enabled and "on" or "off", holder and holder:IsVisible() and "yes" or "no",
         issecret(p) and "secret" or tostring(p), issecret(m) and "secret" or tostring(m), count))
 end
 
 function Combo:Init()
-    local ev = CreateFrame("Frame")
-    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    ev:RegisterEvent("PLAYER_TARGET_CHANGED")
-    ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
-    ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
-    ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
-    ev:RegisterUnitEvent("UNIT_MAXPOWER", "player")
-    ev:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
-    ev:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_TARGET_CHANGED" or event == "UNIT_POWER_FREQUENT" or event == "UNIT_POWER_UPDATE" then
-            Combo:Update()
-        else
-            -- A form, the max or the world changed: whether it shows, and how many pips.
-            Combo:Apply()
-        end
-    end)
+    -- A form, the max or the world changed: whether it shows, and how many pips.
+    C.Watch(function() Combo:Update() end, function() Combo:Apply() end)
     if EventRegistry then
         EventRegistry:RegisterCallback("EditMode.Enter", function() Combo:Apply() end, self)
         EventRegistry:RegisterCallback("EditMode.Exit", function() Combo:Apply() end, self)

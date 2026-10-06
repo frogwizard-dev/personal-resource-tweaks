@@ -14,25 +14,9 @@ local styled = { buffs = {}, debuffs = {} } -- per-button region tables, for res
 local SORT = AuraContainerSortMethod and AuraContainerSortMethod.Default
 local SORT_DIR = AuraContainerSortDirection and AuraContainerSortDirection.Normal
 
--- Countdown text is formatted engine-side (the remaining time can be secret): "45", "2m", "1h".
-local formatter
-local function DurationFormatter()
-    if formatter ~= nil then return formatter or nil end
-    formatter = false
-    local R = Enum.NumericRuleFormatRounding
-    if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and R then
-        local f = C_StringUtil.CreateNumericRuleFormatter()
-        if pcall(f.SetBreakpoints, f, {
-            { threshold = 0, format = "%d", step = 1, rounding = R.Up },
-            { threshold = 60, format = "%dm", step = 1, rounding = R.Up, components = { { div = 60 } } },
-            { threshold = 61, format = "%dm", step = 1, rounding = R.Down, components = { { div = 60 } } },
-            { threshold = 3600, format = "%dh", step = 1, rounding = R.Down, components = { { div = 3600 } } },
-        }) then
-            formatter = f
-        end
-    end
-    return formatter or nil
-end
+-- The rows' building blocks: FrogLib's Auras.lua. Countdown text is formatted engine-side (the
+-- remaining time can be secret): "45", "2m", "1h".
+local A = FrogLib.Auras
 
 local function StyleButton(d)
     local cfg, t = ns.db[d.kind], ns.db.text
@@ -46,59 +30,16 @@ local function StyleButton(d)
     d.duration:SetShown(cfg.showTimer)
 end
 
--- Runs once per engine-created button. Fonts must be set before the regions are handed to
--- the button, because registering them makes the engine write text straight away.
+-- Runs once per engine-created button; the timer centred on the icon.
 local function MakeInit(kind)
     return function(button)
-        local d = { kind = kind, button = button }
-
-        d.border = button:CreateTexture(nil, "BACKGROUND")
-        d.border:SetAllPoints()
-        if kind == "debuffs" then
-            d.border:SetColorTexture(0.8, 0.1, 0.1, 1)
-        else
-            d.border:SetColorTexture(0, 0, 0, 1)
-        end
-
-        d.icon = button:CreateTexture(nil, "ARTWORK")
-        d.icon:SetPoint("TOPLEFT", 1, -1)
-        d.icon:SetPoint("BOTTOMRIGHT", -1, 1)
-        d.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-        d.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-        d.cooldown:SetAllPoints(d.icon)
-        d.cooldown:SetDrawEdge(false)
-        d.cooldown:SetReverse(true)
-        d.cooldown:SetHideCountdownNumbers(true)
-
-        local carrier = CreateFrame("Frame", nil, button)
-        carrier:SetAllPoints()
-        carrier:SetFrameLevel(d.cooldown:GetFrameLevel() + 1)
-        carrier:EnableMouse(false)
-        d.stack = carrier:CreateFontString(nil, "OVERLAY")
-        d.stack:SetPoint("BOTTOMRIGHT", -1, 1)
-        d.duration = carrier:CreateFontString(nil, "OVERLAY")
-        d.duration:SetPoint("CENTER")
-        StyleButton(d)
-
-        -- Clicks off so the icons never eat clicks meant for the world; hover tooltips stay.
-        pcall(button.SetMouseClickEnabled, button, false)
-
-        button:SetIcon(d.icon)
-        button:SetDurationCooldown(d.cooldown)
-        button:SetApplicationCount(d.stack, {})
-        if not pcall(button.SetDurationText, button, d.duration, { textFormatter = DurationFormatter() }) then
-            pcall(button.SetDurationText, button, d.duration, {})
-        end
-
+        local d = A.InitButton(button, { border = kind == "debuffs" and { 0.8, 0.1, 0.1 } or nil, timerOnIcon = true,
+            style = function(new)
+                new.kind = kind
+                StyleButton(new)
+            end })
         table.insert(styled[kind], d)
     end
-end
-
--- Blizzard renamed the container layout setters mid-12.1 (SetAuraLayout* -> SetFlowLayout*).
-local function CallEither(c, newName, oldName, ...)
-    local f = c[newName] or c[oldName]
-    if f then pcall(f, c, ...) end
 end
 
 local function Layout(cfg)
@@ -114,18 +55,11 @@ end
 
 local function Build(kind)
     local cfg = ns.db[kind]
-    local old = containers[kind]
-    if old then
-        pcall(old.SetUnit, old, "none")
-        old:Hide()
-        containers[kind] = nil
-    end
+    A.Release(containers[kind])
+    containers[kind] = nil
 
-    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-        C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-    end
-    local ok, c = pcall(CreateFrame, "AuraContainer", nil, ns.Skin.prd or UIParent, "CustomAuraContainerTemplate")
-    if not ok then
+    local c = A.NewContainer(ns.Skin.prd or UIParent)
+    if not c then
         if not Auras.warned then
             Auras.warned = true
             ns.Print("This client has no aura containers, so buffs/debuffs can't be shown.")
@@ -135,12 +69,9 @@ local function Build(kind)
 
     -- Position it before anything else: the engine only processes containers with a
     -- renderable rect, and one set up unanchored silently never shows an aura.
-    c:SetSize(1, 1)
     containers[kind] = c
     Auras:Anchor()
-    CallEither(c, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "BOTTOMLEFT")
-    CallEither(c, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
-        AnchorUtil.FlowDirection.Right, AnchorUtil.FlowDirection.Up)
+    A.Flow(c, "BOTTOMLEFT", "RIGHT", "UP")
 
     styled[kind] = {}
     local init, layout = MakeInit(kind), Layout(cfg)
@@ -219,8 +150,7 @@ function Auras:Apply()
             for _, key in ipairs(c.prtKeys) do
                 pcall(c.SetAuraGroupLayout, c, key, layout)
             end
-            CallEither(c, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth",
-                cfg.perRow * (cfg.size + cfg.spacing) - cfg.spacing + 0.4)
+            A.SetLineSize(c, cfg.perRow * (cfg.size + cfg.spacing) - cfg.spacing + 0.4)
             c:SetShown(cfg.enabled)
             for _, d in ipairs(styled[kind]) do
                 pcall(StyleButton, d)

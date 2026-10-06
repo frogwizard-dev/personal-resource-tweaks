@@ -76,20 +76,9 @@ ns.defaults = {
 -- Blizzard widgets for display, but not compared or used in arithmetic.
 ns.issecret = FrogLib.issecret
 
-function ns.Print(...)
-    print("|cff66ccffPersonalResourceTweaks|r:", ...)
-end
+ns.Print = FrogLib.Util.Printer("PersonalResourceTweaks", "66ccff")
 
-local function CopyDefaults(src, dst)
-    for k, v in pairs(src) do
-        if type(v) == "table" then
-            if type(dst[k]) ~= "table" then dst[k] = {} end
-            CopyDefaults(v, dst[k])
-        elseif dst[k] == nil then
-            dst[k] = v
-        end
-    end
-end
+local CopyDefaults = FrogLib.Util.CopyDefaults
 
 function ns.Refresh()
     ns.Skin:Apply()

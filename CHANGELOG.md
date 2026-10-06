@@ -1,5 +1,11 @@
 # PersonalResourceTweaks
 
+## 0.8.2
+
+- Settings: a dropdown shows the current choice afresh whenever its page opens. The settings controls and window now come from FrogLib, shared with Frog Wizard's other add-ons.
+- The list of auras on you (to pick one to add) leaves out ones the game hides from add-ons instead of failing on them.
+- Combo points: a druid's form is checked safely when the game hides your power type.
+
 ## 0.8.1
 
 ### Fixes
