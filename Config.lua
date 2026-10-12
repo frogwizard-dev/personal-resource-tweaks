@@ -10,7 +10,7 @@ local Label, Button, Checkbox, Stepper, Dropdown, Options, ColorSwatch, TextBox,
     UI.Label, UI.Button, UI.Checkbox, UI.Stepper, UI.Dropdown, UI.Options, UI.ColorSwatch, UI.TextBox, UI.Placer
 local SpellInfo, ScrollList, Fill = UI.SpellInfo, UI.ScrollList, UI.FillList
 
-local OUTLINES = Options("", "None", "OUTLINE", "Outline", "THICKOUTLINE", "Thick outline")
+local OUTLINES = Options("", "None", "SHADOW", "Drop shadow", "OUTLINE", "Outline", "THICKOUTLINE", "Thick outline")
 local MODES = Options("whitelist", "Whitelist: only these", "blacklist", "Blacklist: all except these")
 
 function Config:BuildBars(p)
