@@ -2,38 +2,35 @@ local _, ns = ...
 local Skin = {}
 ns.Skin = Skin
 
-local issecret = ns.issecret
+local issecret = FrogLib.issecret
 local guard = false
 
 -- Blizzard has moved these children around between patches, so try the known names.
 -- If something isn't found, /prt debug prints the frame tree so we can add the right path.
 function Skin:Find()
-    local prd = _G.PersonalResourceDisplayFrame
-    if not prd then return end
-    local container = prd.HealthBarsContainer
-    local health = (container and (container.healthBar or container.HealthBar)) or prd.healthBar or prd.HealthBar
-    local power = prd.PowerBar or prd.powerBar
-    local alt = prd.AlternatePowerBar
-    return prd, health, power, alt
+    local display = _G.PersonalResourceDisplayFrame
+    if not display then return end
+    local container = display.HealthBarsContainer
+    local health = (container and (container.healthBar or container.HealthBar)) or display.healthBar or display.HealthBar
+    local power = display.PowerBar or display.powerBar
+    local alt = display.AlternatePowerBar
+    return display, health, power, alt
 end
 
 -- Your class colour (FrogLib.Color's: a class colour add-on's first); white if it can't tell.
-local function ClassColor()
+function Skin.ClassColor()
     local _, class = UnitClass("player")
     local r, g, b = FrogLib.Color.Class(class)
     if r then return r, g, b end
     return 1, 1, 1
 end
 
--- Rather than guess texture names, hide by role. The health container is pure art. On the
--- bars, everything Blizzard draws that matters (heal prediction, absorbs, the mana cost) is
--- kept on the bar under a key, while the frame art is unnamed: Blizzard's dark backing, and
--- borders other add-ons add (ClassicUI Forever's gold plate rim). So: hide every unnamed
--- texture that isn't the fill or ours.
+-- Blizzard keeps what matters on a bar (heal prediction, absorbs, the mana cost) under a key, and
+-- its frame art unnamed, as do other add-ons' borders: so every unnamed texture but the fill goes.
 local function NamedRegions(frame)
     local named = {}
-    for _, v in pairs(frame) do
-        if type(v) == "table" and type(v.IsObjectType) == "function" then named[v] = true end
+    for _, value in pairs(frame) do
+        if type(value) == "table" and type(value.IsObjectType) == "function" then named[value] = true end
     end
     return named
 end
@@ -66,35 +63,41 @@ end
 
 -- Blizzard and other add-ons reset texture/colour on their own updates, so re-apply ours
 -- right after.
-local function Hook(bar, colorFn)
-    bar.prtColorFn = colorFn
+local function Hook(bar, GetColor)
+    bar.prtColorFn = GetColor
     if bar.prtHooked then return end
     bar.prtHooked = true
-    local function reapply(self)
+    local function Reapply(self)
         if not guard then Enforce(self) end
     end
-    hooksecurefunc(bar, "SetStatusBarTexture", reapply)
-    hooksecurefunc(bar, "SetStatusBarColor", reapply)
+    hooksecurefunc(bar, "SetStatusBarTexture", Reapply)
+    hooksecurefunc(bar, "SetStatusBarColor", Reapply)
 end
 
--- The border: four edges round the outside of the bar, borderSize screen pixels thick. Sizes in
--- interface units come out as fractions of a pixel at most UI and nameplate scales (and a
--- fraction gets rounded differently on each side), so each edge is sized in whole pixels and the
--- engine keeps its layout on the pixel grid, as Blizzard's own nameplate borders do.
+-- The borders (FrogLib's): the pixel edges, borderSize screen pixels thick, sized in whole pixels
+-- and kept on the pixel grid (as Blizzard's nameplate borders are), the classic stone, or Forever.
 local Borders = FrogLib.Borders
 
 local Snap = FrogLib.PixelSnap
 
-local function PlaceBorder(bar)
-    local b = bar.prtBorder
-    local size = ns.db.skin.borderSize
-    if not b or size <= 0 then return end
-    b.edges:Place(size, 0)
+-- A frame over `parent` holding pixel-snapped edges round `around` (itself if not given); the bars
+-- and the combo pips have them.
+function Skin.EdgeFrame(parent, around)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetAllPoints()
+    Snap(frame)
+    frame.edges = Borders.Edges(frame, around or frame, "OVERLAY")
+    for _, key in ipairs({ "top", "bottom", "left", "right" }) do Snap(frame.edges[key]) end
+    return frame
 end
 
--- The other two border styles (skin.borderStyle; "pixel" is the edges above), both FrogLib's:
---   "classic": the grey stone border tooltips and old frames use, just outside the bar;
---   "forever": our Forever-style frame, on the bar over the fill's edge (thickness 1 to 3).
+local function PlaceBorder(bar)
+    local border = bar.prtBorder
+    local size = ns.db.skin.borderSize
+    if not border or size <= 0 then return end
+    border.edges:Place(size, 0)
+end
+
 local function PlaceFrame(bar)
     if bar.prtFrame then bar.prtFrame:Place(ns.db.skin.frameThickness) end
 end
@@ -106,64 +109,58 @@ local function Decorate(bar)
         bar.prtBg.prtOwned = true
         bar.prtBg:SetAllPoints()
         bar.prtBg:SetColorTexture(0, 0, 0, 0.6)
-        local b = CreateFrame("Frame", nil, bar)
-        b:SetAllPoints()
-        Snap(b)
-        b.edges = Borders.Edges(b, bar, "OVERLAY")
-        for _, key in ipairs({ "top", "bottom", "left", "right" }) do Snap(b.edges[key]) end
-        bar.prtBorder = b
+        bar.prtBorder = Skin.EdgeFrame(bar, bar)
         -- Classic: the stone border, on a frame round the bar.
         bar.prtStone = Borders.Stone(bar, 1)
         -- Forever: our Forever-style frame, on the bar itself, over the fill's edge.
         bar.prtFrame = Borders.Forever(bar, "OVERLAY", 5)
         -- The skin hides every other unnamed texture on the bar.
-        for _, t in pairs(bar.prtFrame:Textures()) do t.prtOwned = true end
+        for _, texture in pairs(bar.prtFrame:Textures()) do texture.prtOwned = true end
         -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale), and
         -- the frame follows the bar's height.
         bar:HookScript("OnSizeChanged", PlaceBorder)
         bar:HookScript("OnSizeChanged", PlaceFrame)
     end
-    local size, c = db.borderSize, db.borderColor
-    local b = bar.prtBorder
-    b.edges:SetColor(c)
+    local size, color = db.borderSize, db.borderColor
+    local border = bar.prtBorder
+    border.edges:SetColor(color)
     PlaceBorder(bar)
     PlaceFrame(bar)
     local style = db.borderStyle
     bar.prtBg:SetShown(db.enabled and db.background)
-    b:SetShown(db.enabled and size > 0 and style == "pixel")
+    border:SetShown(db.enabled and size > 0 and style == "pixel")
     bar.prtStone:SetShown(db.enabled and style == "classic")
     bar.prtFrame:SetShown(db.enabled and style == "forever")
 end
 
-local function HideBlizzardArt(prd, health, power, alt)
-    HideTextures(prd.HealthBarsContainer, true)
+local function HideBlizzardArt(display, health, power, alt)
+    HideTextures(display.HealthBarsContainer, true)
     HideTextures(health)
     HideTextures(power)
     HideTextures(alt)
 end
 
--- The bar texts: templates (words value, max, percent; percent.1 for a decimal), FrogLib.Text's.
--- The values and percentages (FrogLib.Unit's) may be secret: they only ever go into
--- SetFormattedText, which formats them engine-side.
-local vals = {}
-local function SetBarText(fs, template, value, max, pct)
-    if not fs then return end
+-- The bar texts: templates (FrogLib.Text's words value, max, percent). The values (FrogLib.Unit's)
+-- may be secret: they only ever go into SetFormattedText, which formats them engine-side.
+local values = {}
+local function SetBarText(text, template, value, max, percent)
+    if not text then return end
     if not ns.db.skin.enabled then
-        fs:Hide()
+        text:Hide()
         return
     end
-    vals.value, vals.max, vals.percent = value, max, pct
-    FrogLib.Text.Set(fs, template, vals)
-    vals.value, vals.max, vals.percent = nil, nil, nil
+    values.value, values.max, values.percent = value, max, percent
+    FrogLib.Text.Set(text, template, values)
+    values.value, values.max, values.percent = nil, nil, nil
 end
 
 local SLOTS = { "left", "center", "right" }
 
 -- Each bar has three text slots, each with its own template.
-local function SetBarTexts(texts, templates, value, max, pct)
+local function SetBarTexts(texts, templates, value, max, percent)
     if not texts then return end
     for _, slot in ipairs(SLOTS) do
-        SetBarText(texts[slot], templates[slot], value, max, pct)
+        SetBarText(texts[slot], templates[slot], value, max, percent)
     end
 end
 
@@ -173,10 +170,10 @@ local function UpdateHealthText()
 end
 
 local function UpdatePowerText()
-    local pType, token = UnitPowerType("player")
+    local powerType, token = UnitPowerType("player")
     local db = ns.db.skin
     SetBarTexts(Skin.powerTexts, db.powerTextFor[token] or db.powerText,
-        UnitPower("player", pType), UnitPowerMax("player", pType), FrogLib.Unit.PowerPercent("player", pType))
+        UnitPower("player", powerType), UnitPowerMax("player", powerType), FrogLib.Unit.PowerPercent("player", powerType))
 end
 
 -- The third bar: Blizzard's mana bar for druids in a form (and Shadow priests), which shows
@@ -189,13 +186,13 @@ local function UpdateAltText()
         UnitPower("player", MANA), UnitPowerMax("player", MANA), FrogLib.Unit.PowerPercent("player", MANA))
 end
 
--- Whether it should show: "always" (as Blizzard has it), "form" (only while your main bar isn't
--- mana; in caster form it just repeats it) or "never".
+-- Whether it should show: "form" (only while your main bar isn't mana) or "never". Since a Forever
+-- update Blizzard shows it only in a form too; showing it in caster form would mean forcing it
+-- against Blizzard's own updates. A hidden power type leaves it to Blizzard.
 local function AltWanted()
-    local mode = ns.db.skin.altShow
-    if mode == "never" then return false end
-    if mode == "form" then return UnitPowerType("player") ~= MANA end
-    return true
+    if ns.db.skin.altShow == "never" then return false end
+    local powerType = UnitPowerType("player")
+    return issecret(powerType) or powerType ~= MANA
 end
 
 -- Blizzard shows the bar whenever it re-checks it; hidden again right after when it's not wanted.
@@ -209,7 +206,7 @@ function Skin:UpdateAltShown()
             if not AltWanted() then bar:Hide() end
         end)
     end
-    local wanted = AltWanted() and alt.alternatePowerRequirementsMet and not (self.prd and self.prd.hideAltPower)
+    local wanted = AltWanted() and alt.alternatePowerRequirementsMet and not (self.display and self.display.hideAltPower)
     if wanted and not alt:IsShown() then
         alt:Show()
     elseif not wanted and alt:IsShown() then
@@ -220,13 +217,13 @@ end
 local function BarTexts(bar)
     local texts = {}
     for _, slot in ipairs(SLOTS) do
-        local fs = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         if slot == "left" then
-            fs:SetJustifyH("LEFT")
+            text:SetJustifyH("LEFT")
         elseif slot == "right" then
-            fs:SetJustifyH("RIGHT")
+            text:SetJustifyH("RIGHT")
         end
-        texts[slot] = fs
+        texts[slot] = text
     end
     return texts
 end
@@ -241,9 +238,9 @@ local function PositionTexts(texts, bar, padding, nudge)
 end
 
 local function SetFonts(texts, size)
-    local t = ns.db.text
-    for _, fs in pairs(texts) do
-        ns.Media:SetFont(fs, t.font, size, t.outline)
+    local settings = ns.db.text
+    for _, text in pairs(texts) do
+        ns.Media:SetFont(text, settings.font, size, settings.outline)
     end
 end
 
@@ -255,86 +252,86 @@ local PixelUnit = FrogLib.Pixel
 
 -- A bar's current size in screen pixels (for the settings to start from).
 function Skin:MeasureSize(key)
-    local prd = self.prd
-    if not prd then return 0 end
-    local frame = key == "width" and prd or key == "health" and prd.HealthBarsContainer
-        or key == "power" and prd.PowerBar or prd.AlternatePowerBar
+    local display = self.display
+    if not display then return 0 end
+    local frame = key == "width" and display or key == "health" and display.HealthBarsContainer
+        or key == "power" and display.PowerBar or display.AlternatePowerBar
     if not frame then return 0 end
     local units = key == "width" and frame:GetWidth() or frame:GetHeight()
     return math.floor(units / PixelUnit(frame) + 0.5)
 end
 
 function Skin:ApplySize()
-    local prd = self.prd
-    if not prd or sizing then return end
-    if InCombatLockdown() and prd:IsProtected() then return end -- PLAYER_REGEN_ENABLED tries again
-    local s, unit = ns.db.skin.size, PixelUnit(prd)
+    local display = self.display
+    if not display or sizing then return end
+    if InCombatLockdown() and display:IsProtected() then return end -- PLAYER_REGEN_ENABLED tries again
+    local sizes, unit = ns.db.skin.size, PixelUnit(display)
     sizing = true
-    local container, power, alt = prd.HealthBarsContainer, prd.PowerBar, prd.AlternatePowerBar
-    if s.width > 0 then
-        local w = s.width * unit
-        prd:SetWidth(w)
-        for _, f in ipairs({ container, power, alt, prd.ClassFrameContainer }) do
-            if f then f:SetWidth(w) end
+    local container, power, alt = display.HealthBarsContainer, display.PowerBar, display.AlternatePowerBar
+    if sizes.width > 0 then
+        local width = sizes.width * unit
+        display:SetWidth(width)
+        for _, frame in ipairs({ container, power, alt, display.ClassFrameContainer }) do
+            if frame then frame:SetWidth(width) end
         end
-    elseif sized.width and prd.UpdateBarWidth then
-        prd:UpdateBarWidth() -- back to Edit Mode's
+    elseif sized.width and display.UpdateBarWidth then
+        display:UpdateBarWidth() -- back to Edit Mode's
     end
-    if s.health > 0 and container then
-        container:SetHeight(s.health * unit)
-    elseif sized.health and prd.UpdateSystemSettingHealthBarHeight then
-        pcall(prd.UpdateSystemSettingHealthBarHeight, prd)
+    if sizes.health > 0 and container then
+        container:SetHeight(sizes.health * unit)
+    elseif sized.health and display.UpdateSystemSettingHealthBarHeight then
+        pcall(display.UpdateSystemSettingHealthBarHeight, display)
     end
-    local altHeight = s.alt > 0 and s.alt or s.power
-    if s.power > 0 and power then power:SetHeight(s.power * unit) end
+    local altHeight = sizes.alt > 0 and sizes.alt or sizes.power
+    if sizes.power > 0 and power then power:SetHeight(sizes.power * unit) end
     if altHeight > 0 and alt then alt:SetHeight(altHeight * unit) end
-    if (sized.power and s.power == 0) or (sized.alt and altHeight == 0) then
-        if prd.UpdateSystemSettingPowerBarHeight then pcall(prd.UpdateSystemSettingPowerBarHeight, prd) end
-        if s.power > 0 and power then power:SetHeight(s.power * unit) end
+    if (sized.power and sizes.power == 0) or (sized.alt and altHeight == 0) then
+        if display.UpdateSystemSettingPowerBarHeight then pcall(display.UpdateSystemSettingPowerBarHeight, display) end
+        if sizes.power > 0 and power then power:SetHeight(sizes.power * unit) end
         if altHeight > 0 and alt then alt:SetHeight(altHeight * unit) end
     end
-    sized.width, sized.health, sized.power, sized.alt = s.width > 0, s.health > 0, s.power > 0, altHeight > 0
-    if prd.UpdateFrameHeight then prd:UpdateFrameHeight() end
+    sized.width, sized.health, sized.power, sized.alt = sizes.width > 0, sizes.health > 0, sizes.power > 0, altHeight > 0
+    if display.UpdateFrameHeight then display:UpdateFrameHeight() end
     sizing = false
 end
 
 function Skin:Apply()
-    local prd, health, power, alt = self:Find()
-    self.prd, self.health, self.alt = prd, health, alt
-    if not prd then return end
+    local display, health, power, alt = self:Find()
+    self.display, self.health, self.alt = display, health, alt
+    if not display then return end
 
-    if not prd.prtHooked then
-        prd.prtHooked = true
-        prd:HookScript("OnShow", function() ns.Refresh() end)
+    if not display.prtHooked then
+        display.prtHooked = true
+        display:HookScript("OnShow", function() ns.Refresh() end)
         -- Edit Mode's size for the display is a scale, which moves the border off whole pixels.
-        hooksecurefunc(prd, "SetScale", function() ns.Refresh() end)
+        hooksecurefunc(display, "SetScale", function() ns.Refresh() end)
         -- Edit Mode setting its own sizes: put ours back over them.
         for _, method in ipairs({ "UpdateBarWidth", "SetHealthBarHeight", "SetPowerBarHeight" }) do
-            if prd[method] then hooksecurefunc(prd, method, function() Skin:ApplySize() end) end
+            if display[method] then hooksecurefunc(display, method, function() Skin:ApplySize() end) end
         end
     end
     self:ApplySize()
 
-    local t = ns.db.text
+    local text = ns.db.text
     if health then
-        Hook(health, ClassColor)
+        Hook(health, Skin.ClassColor)
         Decorate(health)
         Enforce(health)
         self.healthTexts = self.healthTexts or BarTexts(health)
-        SetFonts(self.healthTexts, t.healthSize)
-        PositionTexts(self.healthTexts, health, t.healthPadding, t.healthNudge)
+        SetFonts(self.healthTexts, text.healthSize)
+        PositionTexts(self.healthTexts, health, text.healthPadding, text.healthNudge)
         UpdateHealthText()
     end
     if power then
         self.powerTexts = self.powerTexts or BarTexts(power)
-        SetFonts(self.powerTexts, t.powerSize)
-        PositionTexts(self.powerTexts, power, t.powerPadding, t.powerNudge)
+        SetFonts(self.powerTexts, text.powerSize)
+        PositionTexts(self.powerTexts, power, text.powerPadding, text.powerNudge)
         UpdatePowerText()
     end
     if alt then
         self.altTexts = self.altTexts or BarTexts(alt)
-        SetFonts(self.altTexts, t.powerSize)
-        PositionTexts(self.altTexts, alt, t.powerPadding, t.powerNudge)
+        SetFonts(self.altTexts, text.powerSize)
+        PositionTexts(self.altTexts, alt, text.powerPadding, text.powerNudge)
         UpdateAltText()
         self:UpdateAltShown()
     end
@@ -344,24 +341,24 @@ function Skin:Apply()
         Enforce(bar)
     end
     if ns.db.skin.enabled then
-        HideBlizzardArt(prd, health, power, alt)
+        HideBlizzardArt(display, health, power, alt)
     end
 end
 
 function Skin:Init()
-    local ev = CreateFrame("Frame")
-    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    ev:RegisterEvent("ADDON_LOADED")
-    ev:RegisterEvent("UI_SCALE_CHANGED")
-    ev:RegisterEvent("DISPLAY_SIZE_CHANGED")
-    ev:RegisterUnitEvent("UNIT_HEALTH", "player")
-    ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
-    ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
-    ev:RegisterUnitEvent("UNIT_MAXPOWER", "player")
-    ev:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
-    ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
-    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-    ev:SetScript("OnEvent", function(_, event)
+    local events = CreateFrame("Frame")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
+    events:RegisterEvent("ADDON_LOADED")
+    events:RegisterEvent("UI_SCALE_CHANGED")
+    events:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    events:RegisterUnitEvent("UNIT_HEALTH", "player")
+    events:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
+    events:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
+    events:RegisterUnitEvent("UNIT_MAXPOWER", "player")
+    events:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
+    events:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:SetScript("OnEvent", function(_, event)
         if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
             UpdateHealthText()
         elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER"
@@ -379,31 +376,31 @@ function Skin:Init()
 end
 
 function Skin:Debug()
-    local prd, health, power, alt = self:Find()
-    if not prd then
+    local display, health, power, alt = self:Find()
+    if not display then
         ns.Print("PersonalResourceDisplayFrame NOT FOUND. Enable the Personal Resource Display in Edit Mode, then /reload.")
         return
     end
-    local function name(f) return f and f:GetDebugName() or "|cffff5555not found|r" end
-    ns.Print("health:", name(health))
-    ns.Print("power:", name(power))
-    ns.Print("alt power:", name(alt))
+    local function Name(frame) return frame and frame:GetDebugName() or "|cffff5555not found|r" end
+    ns.Print("health:", Name(health))
+    ns.Print("power:", Name(power))
+    ns.Print("alt power:", Name(alt))
     ns.Print("Frame tree (textures show their layer and alpha):")
-    local function walk(frame, depth)
+    local function Walk(frame, depth)
         if depth > 4 then return end
-        for _, r in ipairs({ frame:GetRegions() }) do
-            if r:IsObjectType("Texture") then
-                local a = r:GetAlpha() -- secret if the game hides it (the display's gated fade)
+        for _, region in ipairs({ frame:GetRegions() }) do
+            if region:IsObjectType("Texture") then
+                local alpha = region:GetAlpha() -- secret if the game hides it (the display's gated fade)
                 print(string.format("%s- texture %s [%s] alpha %s", string.rep("  ", depth),
-                    r:GetDebugName(), r:GetDrawLayer(), issecret(a) and "hidden" or string.format("%.1f", a)))
+                    region:GetDebugName(), region:GetDrawLayer(), issecret(alpha) and "hidden" or string.format("%.1f", alpha)))
             end
         end
-        for _, c in ipairs({ frame:GetChildren() }) do
-            print(string.rep("  ", depth) .. c:GetDebugName() .. " [" .. c:GetObjectType() .. "]")
-            walk(c, depth + 1)
+        for _, child in ipairs({ frame:GetChildren() }) do
+            print(string.rep("  ", depth) .. child:GetDebugName() .. " [" .. child:GetObjectType() .. "]")
+            Walk(child, depth + 1)
         end
     end
-    walk(prd, 1)
+    Walk(display, 1)
     ns.Auras:Debug()
     ns.Combo:Debug()
 end

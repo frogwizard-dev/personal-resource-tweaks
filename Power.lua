@@ -2,15 +2,11 @@ local _, ns = ...
 local Power = {}
 ns.Power = Power
 
-local issecret = ns.issecret
+local issecret = FrogLib.issecret
 
 ------------------------------------------------------------------------------
--- Fade when idle (FrogLib.Idle): out of combat, at full health, with your power at rest (rage
--- empty, mana or energy full) and, optionally, no target, the display fades out; anything else
--- brings it back. Power the game keeps secret is watched instead: out of combat it ticks until
--- it's full or empty and then stops, so a few quiet seconds mean it's settled. Health the game
--- keeps secret goes through FrogLib's full-health gate: the game itself reads it, and the display
--- only fades at full health (waiting for it to settle faded it at low health too).
+-- Fade when idle (FrogLib.Idle): out of combat, at full health, power at rest and (optionally) no
+-- target. Secret power is watched until it settles; secret health goes through the full-health gate.
 ------------------------------------------------------------------------------
 
 local idle -- the watcher (Init)
@@ -24,53 +20,51 @@ end
 -- force: put our opacity back even if it hasn't changed (Blizzard resets it when it re-shows
 -- the display).
 function Power:UpdateFade(force)
-    local prd = ns.Skin.prd
-    fader.frame = prd
-    if not (prd and idle) then return end
-    local cfg = ns.db.fade
+    local display = ns.Skin.display
+    fader.frame = display
+    if not (display and idle) then return end
+    local fade = ns.db.fade
     local on, secret = false, false
-    if cfg.enabled then
+    if fade.enabled then
         local _
         on, _, secret = Evaluate()
     end
     fader:SetGate((on and secret) and "player" or nil)
-    fader:Set(on and cfg.alpha or 1, force and "again" or nil)
+    fader:Set(on and fade.alpha or 1, force and "again" or nil)
 end
 
 function Power:Debug()
     if not idle then return end
     local on, why, secret = Evaluate()
-    local h, p = UnitHealth("player"), UnitPower("player", (UnitPowerType("player")))
-    local prd = ns.Skin.prd
+    local health, power = UnitHealth("player"), UnitPower("player", (UnitPowerType("player")))
+    local display = ns.Skin.display
     local now = "no display"
-    if prd then
-        local a = prd:GetAlpha()
-        now = issecret(a) and "set by the game (health hidden)" or string.format("%.2f", a)
+    if display then
+        local alpha = display:GetAlpha()
+        now = issecret(alpha) and "set by the game (health hidden)" or string.format("%.2f", alpha)
     end
     local token = select(2, UnitPowerType("player"))
     ns.Print(string.format("fade %s; idle: %s%s; health %s, power %s (%s); opacity wanted %.2f%s, now %s.",
         ns.db.fade.enabled and "on" or "off", on and "yes" or "no", why and (" (" .. why .. ")") or "",
-        issecret(h) and "secret" or tostring(h), issecret(p) and "secret" or tostring(p),
+        issecret(health) and "secret" or tostring(health), issecret(power) and "secret" or tostring(power),
         (not issecret(token) and token) or "?", fader.target, secret and " at full health" or "", now))
 end
 
 ------------------------------------------------------------------------------
--- Cost marks: a thin line on the power bar at the cost of each chosen ability (Revenge's 5 rage,
--- Heroic Strike's 15), so you can see at a glance what you can afford. Only for abilities you
--- know that cost the power the bar shows, so one list serves every character and form.
+-- Cost marks: a line on the power bar at each chosen ability's cost (Revenge's 5 rage), only for
+-- abilities you know that cost the bar's power, so one list serves every character and form.
 ------------------------------------------------------------------------------
 
 local marks = {}
 
--- The ability as you know it (by name, so whichever rank you have), and what it costs in pType.
-local function Cost(id, pType)
+-- The ability as you know it (by name, so whichever rank you have), and what it costs in powerType.
+local function Cost(id, powerType)
     local name = C_Spell.GetSpellName(id)
     local info = name and C_Spell.GetSpellInfo(name)
     if not info then return end
-    for _, c in ipairs(C_Spell.GetSpellPowerCost(info.spellID) or {}) do
-        if c.type == pType and not issecret(c.cost) then
-            local cost = not issecret(c.minCost) and c.minCost and c.minCost > 0 and c.minCost or c.cost
-            return cost
+    for _, entry in ipairs(C_Spell.GetSpellPowerCost(info.spellID) or {}) do
+        if entry.type == powerType and not issecret(entry.cost) then
+            return not issecret(entry.minCost) and entry.minCost and entry.minCost > 0 and entry.minCost or entry.cost
         end
     end
 end
@@ -79,45 +73,42 @@ local Snap = FrogLib.PixelSnap
 
 function Power:UpdateMarks()
     for _, mark in ipairs(marks) do mark:Hide() end
-    local cfg = ns.db.marks
+    local settings = ns.db.marks
     local _, _, bar = ns.Skin:Find()
-    if not (bar and cfg.enabled) then return end
-    local pType = UnitPowerType("player")
-    local max = UnitPowerMax("player", pType)
+    if not (bar and settings.enabled) then return end
+    local powerType = UnitPowerType("player")
+    local max = UnitPowerMax("player", powerType)
     local width = bar:GetWidth()
     if issecret(max) or not max or max <= 0 or not width or width <= 0 then return end
     -- One screen pixel, in the bar's units; marks sit on whole pixels so they stay sharp.
-    local px = FrogLib.Pixel(bar)
-    local c = cfg.color
-    local n = 0
-    for _, id in ipairs(cfg.spells) do
-        local cost = Cost(id, pType)
+    local pixel = FrogLib.Pixel(bar)
+    local color = settings.color
+    local shown = 0
+    for _, id in ipairs(settings.spells) do
+        local cost = Cost(id, powerType)
         if cost and cost > 0 and cost < max then
-            n = n + 1
-            local mark = marks[n]
+            shown = shown + 1
+            local mark = marks[shown]
             if not mark then
                 mark = bar:CreateTexture(nil, "OVERLAY", nil, 7)
                 mark.prtOwned = true -- the skin hides every other unnamed texture on the bar
                 Snap(mark)
-                marks[n] = mark
+                marks[shown] = mark
             end
-            mark:SetColorTexture(c.r, c.g, c.b, c.a or 1)
-            local x = math.floor(width * cost / max / px + 0.5) * px
+            mark:SetColorTexture(color.r, color.g, color.b, color.a or 1)
+            local x = math.floor(width * cost / max / pixel + 0.5) * pixel
             mark:ClearAllPoints()
             mark:SetPoint("TOPLEFT", bar, "TOPLEFT", x, 0)
             mark:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 0)
-            mark:SetWidth(px * cfg.width)
+            mark:SetWidth(pixel * settings.width)
             mark:Show()
         end
     end
 end
 
 ------------------------------------------------------------------------------
--- Mana regen (the five-second rule): spending mana stops your regen for 5 seconds. A thin
--- strip under whichever bar shows your mana fills across those 5 seconds, a spark at its tip,
--- and goes when regen starts again. FrogLib.FSR says when it starts: from the cost of the spell
--- cast (spell data, not your mana, which the game may keep secret), or, for a spell the game
--- keeps secret, from the drop in your mana that comes with it.
+-- The five-second rule: spending mana stops regen for 5 seconds, which a strip under the bar showing
+-- your mana fills across. FrogLib.FSR says when they start (from the spell's cost, or your mana's drop).
 ------------------------------------------------------------------------------
 
 local MANA = (Enum.PowerType and Enum.PowerType.Mana) or 0
@@ -132,12 +123,7 @@ local function ManaBar()
     if alt and alt:IsShown() then return alt end
 end
 
-local regen = CreateFrame("Frame")
-regen:Hide()
-regen.strip = regen:CreateTexture(nil, "OVERLAY")
-regen.spark = regen:CreateTexture(nil, "OVERLAY", nil, 1)
-regen.spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
-regen.spark:SetBlendMode("ADD")
+local regen = FrogLib.FSR.NewStrip()
 
 regen:SetScript("OnUpdate", function(self)
     local left = regenAt and (regenAt - GetTime()) or 0
@@ -147,38 +133,29 @@ regen:SetScript("OnUpdate", function(self)
         return
     end
     if self.bar ~= bar then
-        -- Under that bar, two pixels tall, just below its edge.
+        -- Under that bar, two pixels tall, a pixel below its edge.
         self.bar = bar
         -- On the display, not the bar: the main power bar clips anything outside its edges.
-        self:SetParent(ns.Skin.prd or bar:GetParent())
+        self:SetParent(ns.Skin.display or bar:GetParent())
         self:SetFrameStrata(bar:GetFrameStrata())
-        local px = FrogLib.Pixel(self)
-        self:ClearAllPoints()
-        self:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -px)
-        self:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -px)
-        self:SetHeight(px * 2)
+        local pixel = FrogLib.Pixel(self)
+        self:Place(bar, pixel, pixel)
         self:SetFrameLevel(bar:GetFrameLevel() + 5)
-        self.spark:SetSize(px * 8, px * 10)
     end
-    local width = (1 - left / RULE) * self:GetWidth()
-    self.strip:ClearAllPoints()
-    self.strip:SetPoint("TOPLEFT")
-    self.strip:SetPoint("BOTTOMLEFT")
-    self.strip:SetWidth(math.max(0.01, width))
-    self.spark:ClearAllPoints()
-    self.spark:SetPoint("CENTER", self, "LEFT", width, 0)
+    self:SetLeft(left)
 end)
 
 function Power:StartRegenTimer()
     if not ns.db.regen.enabled then return end
     regenAt = GetTime() + RULE
-    local c = ns.db.regen.color
-    regen.strip:SetColorTexture(c.r, c.g, c.b, 0.9)
-    regen.spark:SetVertexColor(c.r, c.g, c.b)
+    local color = ns.db.regen.color
+    regen:SetColor(color.r, color.g, color.b, 0.9)
     regen.bar = nil -- placed afresh: the mana bar may have changed
     regen:Show()
 end
 
+------------------------------------------------------------------------------
+-- Starting up
 ------------------------------------------------------------------------------
 
 function Power:Init()
@@ -191,22 +168,22 @@ function Power:Init()
     end })
     fsr:Listen()
     -- The cost marks.
-    local ev = CreateFrame("Frame")
+    local events = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED" }) do
-        ev:RegisterEvent(event)
+        events:RegisterEvent(event)
     end
     for _, event in ipairs({ "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do
-        ev:RegisterUnitEvent(event, "player")
+        events:RegisterUnitEvent(event, "player")
     end
-    ev:SetScript("OnEvent", function() Power:UpdateMarks() end)
+    events:SetScript("OnEvent", function() Power:UpdateMarks() end)
     self:Apply()
 end
 
 function Power:Apply()
-    local prd, _, bar = ns.Skin:Find()
-    if prd and not self.hooked then
+    local display, _, bar = ns.Skin:Find()
+    if display and not self.hooked then
         self.hooked = true
-        prd:HookScript("OnShow", function() Power:UpdateFade(true) end)
+        display:HookScript("OnShow", function() Power:UpdateFade(true) end)
         if bar then bar:HookScript("OnSizeChanged", function() Power:UpdateMarks() end) end
     end
     self:UpdateMarks()
