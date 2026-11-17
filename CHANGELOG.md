@@ -1,5 +1,12 @@
 # PersonalResourceTweaks
 
+## 0.8.5
+
+- Warriors and rogues: the five-second rule listens to nothing (no mana).
+- Combo points follow points moved to a new target, and don't redraw on every energy tick.
+- Nothing of PRT's is written on Blizzard's bars any more (its notes about them live in PRT's own tables), and the hidden druid mana bar is never hidden mid-fight while the display is locked; it waits for the fight's end.
+- Shared code (FrogLib 1.12.0): see its notes for the rest of what's fixed.
+
 ## 0.8.4
 
 - Combo points: a Forever update gave the Personal Resource Display its own row of combo points under the bars, so rogues, and druids in cat form, saw two rows. Blizzard's row is now hidden while PRT's is on (turning PRT's off brings it back), and PRT's sits right under your lowest bar again, not below the space Blizzard keeps for its own. Clicks on the display (target yourself, open your menu) still stop at the bars, not in the empty space Blizzard keeps under them. In the gamepad UI PRT leaves Blizzard's combo points alone and says once in chat that Edit Mode's "Hide Class Resource" hides them instead.

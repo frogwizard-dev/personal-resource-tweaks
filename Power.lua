@@ -91,7 +91,7 @@ function Power:UpdateMarks()
             local mark = marks[shown]
             if not mark then
                 mark = bar:CreateTexture(nil, "OVERLAY", nil, 7)
-                mark.prtOwned = true -- the skin hides every other unnamed texture on the bar
+                ns.Skin.owned[mark] = true -- the skin hides every other unnamed texture on the bar
                 Snap(mark)
                 marks[shown] = mark
             end

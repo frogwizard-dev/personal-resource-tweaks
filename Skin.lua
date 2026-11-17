@@ -5,6 +5,16 @@ ns.Skin = Skin
 local issecret = FrogLib.issecret
 local guard = false
 
+-- What we keep about Blizzard's bars lives here, never on the bars themselves (a key of an add-on's on a frame of
+-- Blizzard's is read by its own code as the add-on's).
+Skin.owned = setmetatable({}, { __mode = "k" }) -- [texture] = ours, on one of Blizzard's bars (never hidden by us)
+local owned = Skin.owned
+local colorFns = setmetatable({}, { __mode = "k" }) -- [bar] = its colour, or false
+local hooked = setmetatable({}, { __mode = "k" })   -- [bar] = its texture and colour are watched
+local decor = setmetatable({}, { __mode = "k" })    -- [bar] = { bg, border, stone, frame }, ours on it
+local showHooked = setmetatable({}, { __mode = "k" })
+local displayHooked = false
+
 -- Blizzard has moved these children around between patches, so try the known names.
 -- If something isn't found, /prt debug prints the frame tree so we can add the right path.
 function Skin:Find()
@@ -40,7 +50,7 @@ local function HideTextures(frame, allLayers)
     local fill = frame.GetStatusBarTexture and frame:GetStatusBarTexture()
     local named = not allLayers and NamedRegions(frame)
     for _, region in ipairs({ frame:GetRegions() }) do
-        if region:IsObjectType("Texture") and not region.prtOwned and region ~= fill
+        if region:IsObjectType("Texture") and not owned[region] and region ~= fill
             and (allLayers or not named[region]) then
             region:SetAlpha(0)
         end
@@ -52,8 +62,8 @@ local function Enforce(bar)
     if not db.enabled then return end
     guard = true
     bar:SetStatusBarTexture(db.texture)
-    if bar.prtColorFn and db.classColor then
-        bar:SetStatusBarColor(bar.prtColorFn())
+    if colorFns[bar] and db.classColor then
+        bar:SetStatusBarColor(colorFns[bar]())
     end
     guard = false
     -- Another add-on re-skinning the bar (ClassicUI Forever adds its rim, then sets its
@@ -64,9 +74,9 @@ end
 -- Blizzard and other add-ons reset texture/colour on their own updates, so re-apply ours
 -- right after.
 local function Hook(bar, GetColor)
-    bar.prtColorFn = GetColor
-    if bar.prtHooked then return end
-    bar.prtHooked = true
+    colorFns[bar] = GetColor or false
+    if hooked[bar] then return end
+    hooked[bar] = true
     local function Reapply(self)
         if not guard then Enforce(self) end
     end
@@ -92,45 +102,48 @@ function Skin.EdgeFrame(parent, around)
 end
 
 local function PlaceBorder(bar)
-    local border = bar.prtBorder
+    local ours = decor[bar]
     local size = ns.db.skin.borderSize
-    if not border or size <= 0 then return end
-    border.edges:Place(size, 0)
+    if not ours or size <= 0 then return end
+    ours.border.edges:Place(size, 0)
 end
 
 local function PlaceFrame(bar)
-    if bar.prtFrame then bar.prtFrame:Place(ns.db.skin.frameThickness) end
+    local ours = decor[bar]
+    if ours then ours.frame:Place(ns.db.skin.frameThickness) end
 end
 
 local function Decorate(bar)
     local db = ns.db.skin
-    if not bar.prtBg then
-        bar.prtBg = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
-        bar.prtBg.prtOwned = true
-        bar.prtBg:SetAllPoints()
-        bar.prtBg:SetColorTexture(0, 0, 0, 0.6)
-        bar.prtBorder = Skin.EdgeFrame(bar, bar)
+    local ours = decor[bar]
+    if not ours then
+        ours = {}
+        decor[bar] = ours
+        ours.bg = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
+        owned[ours.bg] = true
+        ours.bg:SetAllPoints()
+        ours.bg:SetColorTexture(0, 0, 0, 0.6)
+        ours.border = Skin.EdgeFrame(bar, bar)
         -- Classic: the stone border, on a frame round the bar.
-        bar.prtStone = Borders.Stone(bar, 1)
+        ours.stone = Borders.Stone(bar, 1)
         -- Forever: our Forever-style frame, on the bar itself, over the fill's edge.
-        bar.prtFrame = Borders.Forever(bar, "OVERLAY", 5)
+        ours.frame = Borders.Forever(bar, "OVERLAY", 5)
         -- The skin hides every other unnamed texture on the bar.
-        for _, texture in pairs(bar.prtFrame:Textures()) do texture.prtOwned = true end
+        for _, texture in pairs(ours.frame:Textures()) do owned[texture] = true end
         -- The pixel size changes with the display's scale (Edit Mode, the nameplate scale), and
         -- the frame follows the bar's height.
         bar:HookScript("OnSizeChanged", PlaceBorder)
         bar:HookScript("OnSizeChanged", PlaceFrame)
     end
     local size, color = db.borderSize, db.borderColor
-    local border = bar.prtBorder
-    border.edges:SetColor(color)
+    ours.border.edges:SetColor(color)
     PlaceBorder(bar)
     PlaceFrame(bar)
     local style = db.borderStyle
-    bar.prtBg:SetShown(db.enabled and db.background)
-    border:SetShown(db.enabled and size > 0 and style == "pixel")
-    bar.prtStone:SetShown(db.enabled and style == "classic")
-    bar.prtFrame:SetShown(db.enabled and style == "forever")
+    ours.bg:SetShown(db.enabled and db.background)
+    ours.border:SetShown(db.enabled and size > 0 and style == "pixel")
+    ours.stone:SetShown(db.enabled and style == "classic")
+    ours.frame:SetShown(db.enabled and style == "forever")
 end
 
 local function HideBlizzardArt(display, health, power, alt)
@@ -195,15 +208,20 @@ local function AltWanted()
     return issecret(powerType) or powerType ~= MANA
 end
 
--- Blizzard shows the bar whenever it re-checks it; hidden again right after when it's not wanted.
--- Shown only where Blizzard would show it (the class and spec it's for).
+-- Blizzard shows the bar whenever it re-checks it; hidden again right after when it's not wanted (as EllesmereUI
+-- hides a button the game keeps showing). Shown only where Blizzard would show it (the class and spec it's for).
+-- Never while the display is protected in combat: that waits for the fight's end (ApplySize's event).
+local function CanChange(frame)
+    return not (InCombatLockdown() and frame:IsProtected())
+end
+
 function Skin:UpdateAltShown()
     local alt = self.alt
-    if not alt then return end
-    if not alt.prtShowHooked then
-        alt.prtShowHooked = true
+    if not alt or not CanChange(alt) then return end
+    if not showHooked[alt] then
+        showHooked[alt] = true
         hooksecurefunc(alt, "Show", function(bar)
-            if not AltWanted() then bar:Hide() end
+            if not AltWanted() and CanChange(bar) then bar:Hide() end
         end)
     end
     local wanted = AltWanted() and alt.alternatePowerRequirementsMet and not (self.display and self.display.hideAltPower)
@@ -300,8 +318,8 @@ function Skin:Apply()
     self.display, self.health, self.alt = display, health, alt
     if not display then return end
 
-    if not display.prtHooked then
-        display.prtHooked = true
+    if not displayHooked then
+        displayHooked = true
         display:HookScript("OnShow", function() ns.Refresh() end)
         -- Edit Mode's size for the display is a scale, which moves the border off whole pixels.
         hooksecurefunc(display, "SetScale", function() ns.Refresh() end)
@@ -368,6 +386,7 @@ function Skin:Init()
             if event == "UNIT_DISPLAYPOWER" or event == "UPDATE_SHAPESHIFT_FORM" then self:UpdateAltShown() end
         elseif event == "PLAYER_REGEN_ENABLED" then
             self:ApplySize()
+            self:UpdateAltShown()
         else
             ns.Refresh()
         end
