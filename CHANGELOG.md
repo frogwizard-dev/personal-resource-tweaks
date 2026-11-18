@@ -1,5 +1,9 @@
 # PersonalResourceTweaks
 
+## 0.8.6
+
+- Its chat lines (the frame dump too) wait for the end of combat when they come during it. Shared code (FrogLib 1.13.0): chat lines that come during combat wait for it to end (a line printed in combat taints the chat history, as EllesmereUI found).
+
 ## 0.8.5
 
 - Warriors and rogues: the five-second rule listens to nothing (no mana).

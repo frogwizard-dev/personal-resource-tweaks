@@ -410,12 +410,12 @@ function Skin:Debug()
         for _, region in ipairs({ frame:GetRegions() }) do
             if region:IsObjectType("Texture") then
                 local alpha = region:GetAlpha() -- secret if the game hides it (the display's gated fade)
-                print(string.format("%s- texture %s [%s] alpha %s", string.rep("  ", depth),
+                FrogLib.Util.Say(string.format("%s- texture %s [%s] alpha %s", string.rep("  ", depth),
                     region:GetDebugName(), region:GetDrawLayer(), issecret(alpha) and "hidden" or string.format("%.1f", alpha)))
             end
         end
         for _, child in ipairs({ frame:GetChildren() }) do
-            print(string.rep("  ", depth) .. child:GetDebugName() .. " [" .. child:GetObjectType() .. "]")
+            FrogLib.Util.Say(string.rep("  ", depth) .. child:GetDebugName() .. " [" .. child:GetObjectType() .. "]")
             Walk(child, depth + 1)
         end
     end
